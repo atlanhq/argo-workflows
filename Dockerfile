@@ -15,7 +15,7 @@ RUN apk update && apk add --no-cache \
     bash \
     mailcap
 
-WORKDIR /go/src/github.com/argoproj/argo-workflows
+WORKDIR /go/src/github.com/atlanhq/argo-workflows
 COPY go.mod .
 COPY go.sum .
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
@@ -78,7 +78,7 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
 
 FROM gcr.io/distroless/static as argoexec
 
-COPY --from=argoexec-build /go/src/github.com/argoproj/argo-workflows/dist/argoexec /bin/
+COPY --from=argoexec-build /go/src/github.com/atlanhq/argo-workflows/dist/argoexec /bin/
 COPY --from=argoexec-build /etc/mime.types /etc/mime.types
 COPY hack/ssh_known_hosts /etc/ssh/
 COPY hack/nsswitch.conf /etc/
@@ -93,7 +93,7 @@ USER 8737
 
 COPY hack/ssh_known_hosts /etc/ssh/
 COPY hack/nsswitch.conf /etc/
-COPY --chown=8737 --from=workflow-controller-build /go/src/github.com/argoproj/argo-workflows/dist/workflow-controller /bin/
+COPY --chown=8737 --from=workflow-controller-build /go/src/github.com/atlanhq/argo-workflows/dist/workflow-controller /bin/
 
 ENTRYPOINT [ "workflow-controller" ]
 
@@ -107,6 +107,6 @@ WORKDIR /home/argo
 
 COPY hack/ssh_known_hosts /etc/ssh/
 COPY hack/nsswitch.conf /etc/
-COPY --from=argocli-build /go/src/github.com/argoproj/argo-workflows/dist/argo /bin/
+COPY --from=argocli-build /go/src/github.com/atlanhq/argo-workflows/dist/argo /bin/
 
 ENTRYPOINT [ "argo" ]
