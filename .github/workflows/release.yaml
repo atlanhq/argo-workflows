@@ -85,7 +85,7 @@ jobs:
           GIT_TREE_STATE=$(if [ -z "`git status --porcelain`" ]; then echo "clean" ; else echo "dirty"; fi)
   
           tag_suffix=$(echo $PLATFORM | sed -r "s/\//-/g")
-          image_name="ghcr.io/atlanhq/${TARGET}:${tag}-${tag_suffix}"
+          image_name="ghcr.io/atlanhq/${TARGET}:${tag}
 
           docker buildx build \
             --cache-from "type=local,src=/tmp/.buildx-cache" \
