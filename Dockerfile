@@ -99,7 +99,7 @@ ENTRYPOINT [ "workflow-controller" ]
 
 ####################################################################################################
 
-FROM gcr.io/distroless/static as argocli
+FROM gcr.io/distroless/static as argocli-atlan
 
 USER 8737
 
