@@ -76,7 +76,7 @@ RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache
 
 ####################################################################################################
 
-FROM gcr.io/distroless/static as argoexec
+FROM gcr.io/distroless/static as argoexec-atlan
 
 COPY --from=argoexec-build /go/src/github.com/atlanhq/argo-workflows/dist/argoexec /bin/
 COPY --from=argoexec-build /etc/mime.types /etc/mime.types
@@ -87,7 +87,7 @@ ENTRYPOINT [ "argoexec" ]
 
 ####################################################################################################
 
-FROM gcr.io/distroless/static as workflow-controller
+FROM gcr.io/distroless/static as workflow-controller-atlan
 
 USER 8737
 
