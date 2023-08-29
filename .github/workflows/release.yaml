@@ -77,7 +77,7 @@ jobs:
           set -eux
           tag=$(basename $GITHUB_REF)
           if [ $tag = "argo-atlan" ]; then
-            tag="latest"
+            tag="v3.4.9"
           fi
           # copied verbatim from Makefile
           GIT_COMMIT=$(git rev-parse HEAD || echo unknown)
