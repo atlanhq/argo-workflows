@@ -28,24 +28,7 @@ func ImageTag() string {
 
 // GetVersion returns the version information
 func GetVersion() wfv1.Version {
-	var versionStr string
-	if gitCommit != "" && gitTag != "" && gitTreeState == "clean" {
-		// if we have a clean tree state and the current commit is tagged,
-		// this is an official release.
-		versionStr = gitTag
-	} else {
-		// otherwise formulate a version string based on as much metadata
-		// information we have available.
-		versionStr = version
-		if len(gitCommit) >= 7 {
-			versionStr += "+" + gitCommit[0:7]
-			if gitTreeState != "clean" {
-				versionStr += ".dirty"
-			}
-		} else {
-			versionStr += "+unknown"
-		}
-	}
+	var versionStr = "v3.5.2-atlan-0.9.1"
 	return wfv1.Version{
 		Version:      versionStr,
 		BuildDate:    buildDate,
