@@ -55,11 +55,13 @@ func AddHostnamesToAffinity(hostSelector string, hostNames []string, targetAffin
 		Values:   hostNames,
 	}
 
+	const affinityWeight = 50
+
 	sourceAffinity := &apiv1.Affinity{
 		NodeAffinity: &apiv1.NodeAffinity{
 			PreferredDuringSchedulingIgnoredDuringExecution: []apiv1.PreferredSchedulingTerm{
 				{
-					Weight: 50,
+					Weight: affinityWeight,
 					Preference: apiv1.NodeSelectorTerm{
 						MatchExpressions: []apiv1.NodeSelectorRequirement{
 							nodeSelectorRequirement,
@@ -96,20 +98,22 @@ func AddHostnamesToAffinity(hostSelector string, hostNames []string, targetAffin
 
 	// find if specific NodeSelectorTerm exists and append
 	for i := range targetExecution {
-		for j := range targetExecution[i].Preference.MatchExpressions {
-			if targetExecution[i].Preference.MatchExpressions[j].Key == hostSelector &&
-				targetExecution[i].Preference.MatchExpressions[j].Operator == apiv1.NodeSelectorOpNotIn {
-				targetExecution[i].Preference.MatchExpressions[j].Values =
-					append(targetExecution[i].Preference.MatchExpressions[j].Values, hostNames...)
-				targetExecution[i].Preference.MatchExpressions[j].Values =
-					RemoveDuplicates(targetExecution[i].Preference.MatchExpressions[j].Values)
-				return targetAffinity
+		if targetExecution[i].Weight == affinityWeight {
+			for j := range targetExecution[i].Preference.MatchExpressions {
+				if targetExecution[i].Preference.MatchExpressions[j].Key == hostSelector &&
+					targetExecution[i].Preference.MatchExpressions[j].Operator == apiv1.NodeSelectorOpNotIn {
+					targetExecution[i].Preference.MatchExpressions[j].Values =
+						append(targetExecution[i].Preference.MatchExpressions[j].Values, hostNames...)
+					targetExecution[i].Preference.MatchExpressions[j].Values =
+						RemoveDuplicates(targetExecution[i].Preference.MatchExpressions[j].Values)
+					return targetAffinity
+				}
 			}
 		}
 	}
 
-	targetExecution[0].Preference.MatchExpressions =
-		append(targetExecution[0].Preference.MatchExpressions, nodeSelectorRequirement)
+	targetAffinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution = 
+		append(targetAffinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution, sourceAffinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution[0])
 
 	return targetAffinity
 }
