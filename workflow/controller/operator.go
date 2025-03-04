@@ -1105,9 +1105,9 @@ func (woc *wfOperationCtx) processNodeRetries(node *wfv1.NodeStatus, retryStrate
 		retryOnFailed = false
 		retryOnError = true
 	case wfv1.RetryPolicyOnTransientError:
+		retryOnError = true
 		if (lastChildNode.Phase == wfv1.NodeFailed || lastChildNode.Phase == wfv1.NodeError) && errorsutil.IsTransientErr(errors.InternalError(lastChildNode.Message)) {
 			retryOnFailed = true
-			retryOnError = true
 		}
 	case wfv1.RetryPolicyOnFailure:
 		retryOnFailed = true
@@ -1924,6 +1924,10 @@ func getRetryNodeChildrenIds(node *wfv1.NodeStatus, nodes wfv1.Nodes) []string {
 
 func buildRetryStrategyLocalScope(node *wfv1.NodeStatus, nodes wfv1.Nodes) map[string]interface{} {
 	localScope := make(map[string]interface{})
+	localScope[common.LocalVarRetriesLastExitCode] = "0"
+	localScope[common.LocalVarRetriesLastStatus] = ""
+	localScope[common.LocalVarRetriesLastDuration] = "0"
+	localScope[common.LocalVarRetriesLastMessage] = ""
 
 	// `retries` variable
 	childNodeIds, lastChildNode := getChildNodeIdsAndLastRetriedNode(node, nodes)
@@ -2218,8 +2222,14 @@ func (woc *wfOperationCtx) executeTemplate(ctx context.Context, nodeName string,
 			localScope, realTimeScope := woc.prepareMetricScope(lastChildNode)
 			woc.computeMetrics(processedTmpl.Metrics.Prometheus, localScope, realTimeScope, false)
 		}
-
-		var retryNum int
+		localScope := buildRetryStrategyLocalScope(retryParentNode, woc.wf.Status.Nodes)
+		for key, value := range localScope {
+			strKey := fmt.Sprintf("%v", key)
+			strValue := fmt.Sprintf("%v", value)
+			localParams[strKey] = strValue
+		}
+		retryNum := len(childNodeIDs)
+		localParams[common.LocalVarRetries] = strconv.Itoa(retryNum)
 		if lastChildNode != nil && !lastChildNode.Fulfilled() {
 			// Last child node is either still running, or in some cases the corresponding Pod hasn't even been
 			// created yet, for example if it exceeded the ResourceQuota
@@ -2234,7 +2244,6 @@ func (woc *wfOperationCtx) executeTemplate(ctx context.Context, nodeName string,
 			node = nil
 		}
 
-		localParams = make(map[string]string)
 		// Change the `pod.name` variable to the new retry node name
 		if processedTmpl.IsPodType() {
 			localParams[common.LocalVarPodName] = woc.getPodName(nodeName, processedTmpl.Name)
@@ -2253,21 +2262,21 @@ func (woc *wfOperationCtx) executeTemplate(ctx context.Context, nodeName string,
 
 	switch processedTmpl.GetType() {
 	case wfv1.TemplateTypeContainer:
-		node, err = woc.executeContainer(ctx, nodeName, templateScope, processedTmpl, orgTmpl, opts)
+		node, err = woc.executeContainer(ctx, nodeName, templateScope, processedTmpl, orgTmpl, opts, localParams)
 	case wfv1.TemplateTypeContainerSet:
-		node, err = woc.executeContainerSet(ctx, nodeName, templateScope, processedTmpl, orgTmpl, opts)
+		node, err = woc.executeContainerSet(ctx, nodeName, templateScope, processedTmpl, orgTmpl, opts, localParams)
 	case wfv1.TemplateTypeSteps:
 		node, err = woc.executeSteps(ctx, nodeName, newTmplCtx, templateScope, processedTmpl, orgTmpl, opts)
 	case wfv1.TemplateTypeScript:
-		node, err = woc.executeScript(ctx, nodeName, templateScope, processedTmpl, orgTmpl, opts)
+		node, err = woc.executeScript(ctx, nodeName, templateScope, processedTmpl, orgTmpl, opts, localParams)
 	case wfv1.TemplateTypeResource:
-		node, err = woc.executeResource(ctx, nodeName, templateScope, processedTmpl, orgTmpl, opts)
+		node, err = woc.executeResource(ctx, nodeName, templateScope, processedTmpl, orgTmpl, opts, localParams)
 	case wfv1.TemplateTypeDAG:
 		node, err = woc.executeDAG(ctx, nodeName, newTmplCtx, templateScope, processedTmpl, orgTmpl, opts)
 	case wfv1.TemplateTypeSuspend:
 		node, err = woc.executeSuspend(nodeName, templateScope, processedTmpl, orgTmpl, opts)
 	case wfv1.TemplateTypeData:
-		node, err = woc.executeData(ctx, nodeName, templateScope, processedTmpl, orgTmpl, opts)
+		node, err = woc.executeData(ctx, nodeName, templateScope, processedTmpl, orgTmpl, opts, localParams)
 	case wfv1.TemplateTypeHTTP:
 		node = woc.executeHTTPTemplate(nodeName, templateScope, processedTmpl, orgTmpl, opts)
 	case wfv1.TemplateTypePlugin:
@@ -2886,14 +2895,10 @@ func (woc *wfOperationCtx) checkParallelism(tmpl *wfv1.Template, node *wfv1.Node
 	if boundaryID != "" && (node == nil || (node.Phase != wfv1.NodePending && node.Phase != wfv1.NodeRunning)) {
 		boundaryNode, err := woc.wf.Status.Nodes.Get(boundaryID)
 		if err != nil {
-			woc.log.Errorf("was unable to obtain node for %s", boundaryID)
-			return errors.InternalError("boundaryNode not found")
-		}
-		tmplCtx, err := woc.createTemplateContext(boundaryNode.GetTemplateScope())
-		if err != nil {
 			return err
 		}
-		_, boundaryTemplate, templateStored, err := tmplCtx.ResolveTemplate(boundaryNode)
+
+		boundaryTemplate, templateStored, err := woc.GetTemplateByBoundaryID(boundaryID)
 		if err != nil {
 			return err
 		}
@@ -2924,7 +2929,7 @@ func (woc *wfOperationCtx) checkParallelism(tmpl *wfv1.Template, node *wfv1.Node
 	return nil
 }
 
-func (woc *wfOperationCtx) executeContainer(ctx context.Context, nodeName string, templateScope string, tmpl *wfv1.Template, orgTmpl wfv1.TemplateReferenceHolder, opts *executeTemplateOpts) (*wfv1.NodeStatus, error) {
+func (woc *wfOperationCtx) executeContainer(ctx context.Context, nodeName string, templateScope string, tmpl *wfv1.Template, orgTmpl wfv1.TemplateReferenceHolder, opts *executeTemplateOpts, localParams map[string]string) (*wfv1.NodeStatus, error) {
 	node, err := woc.wf.GetNodeByName(nodeName)
 	if err != nil {
 		node = woc.initializeExecutableNode(nodeName, wfv1.NodeTypePod, templateScope, tmpl, orgTmpl, opts.boundaryID, wfv1.NodePending, opts.nodeFlag)
@@ -2942,7 +2947,7 @@ func (woc *wfOperationCtx) executeContainer(ctx context.Context, nodeName string
 		includeScriptOutput: includeScriptOutput,
 		onExitPod:           opts.onExitTemplate,
 		executionDeadline:   opts.executionDeadline,
-	})
+	}, localParams)
 
 	if err != nil {
 		return woc.requeueIfTransientErr(err, node.Name)
@@ -3140,7 +3145,7 @@ loop:
 	return nodeName
 }
 
-func (woc *wfOperationCtx) executeScript(ctx context.Context, nodeName string, templateScope string, tmpl *wfv1.Template, orgTmpl wfv1.TemplateReferenceHolder, opts *executeTemplateOpts) (*wfv1.NodeStatus, error) {
+func (woc *wfOperationCtx) executeScript(ctx context.Context, nodeName string, templateScope string, tmpl *wfv1.Template, orgTmpl wfv1.TemplateReferenceHolder, opts *executeTemplateOpts, localParams map[string]string) (*wfv1.NodeStatus, error) {
 	node, err := woc.wf.GetNodeByName(nodeName)
 	if err != nil {
 		node = woc.initializeExecutableNode(nodeName, wfv1.NodeTypePod, templateScope, tmpl, orgTmpl, opts.boundaryID, wfv1.NodePending, opts.nodeFlag)
@@ -3165,7 +3170,7 @@ func (woc *wfOperationCtx) executeScript(ctx context.Context, nodeName string, t
 		includeScriptOutput: includeScriptOutput,
 		onExitPod:           opts.onExitTemplate,
 		executionDeadline:   opts.executionDeadline,
-	})
+	}, localParams)
 	if err != nil {
 		return woc.requeueIfTransientErr(err, node.Name)
 	}
@@ -3470,7 +3475,7 @@ func (woc *wfOperationCtx) addChildNode(parent string, child string) {
 }
 
 // executeResource is runs a kubectl command against a manifest
-func (woc *wfOperationCtx) executeResource(ctx context.Context, nodeName string, templateScope string, tmpl *wfv1.Template, orgTmpl wfv1.TemplateReferenceHolder, opts *executeTemplateOpts) (*wfv1.NodeStatus, error) {
+func (woc *wfOperationCtx) executeResource(ctx context.Context, nodeName string, templateScope string, tmpl *wfv1.Template, orgTmpl wfv1.TemplateReferenceHolder, opts *executeTemplateOpts, localParams map[string]string) (*wfv1.NodeStatus, error) {
 	node, err := woc.wf.GetNodeByName(nodeName)
 
 	if err != nil {
@@ -3499,7 +3504,7 @@ func (woc *wfOperationCtx) executeResource(ctx context.Context, nodeName string,
 
 	mainCtr := woc.newExecContainer(common.MainContainerName, tmpl)
 	mainCtr.Command = []string{"argoexec", "resource", tmpl.Resource.Action}
-	_, err = woc.createWorkflowPod(ctx, nodeName, []apiv1.Container{*mainCtr}, tmpl, &createWorkflowPodOpts{onExitPod: opts.onExitTemplate, executionDeadline: opts.executionDeadline})
+	_, err = woc.createWorkflowPod(ctx, nodeName, []apiv1.Container{*mainCtr}, tmpl, &createWorkflowPodOpts{onExitPod: opts.onExitTemplate, executionDeadline: opts.executionDeadline}, localParams)
 	if err != nil {
 		return woc.requeueIfTransientErr(err, node.Name)
 	}
@@ -3507,7 +3512,7 @@ func (woc *wfOperationCtx) executeResource(ctx context.Context, nodeName string,
 	return node, err
 }
 
-func (woc *wfOperationCtx) executeData(ctx context.Context, nodeName string, templateScope string, tmpl *wfv1.Template, orgTmpl wfv1.TemplateReferenceHolder, opts *executeTemplateOpts) (*wfv1.NodeStatus, error) {
+func (woc *wfOperationCtx) executeData(ctx context.Context, nodeName string, templateScope string, tmpl *wfv1.Template, orgTmpl wfv1.TemplateReferenceHolder, opts *executeTemplateOpts, localParams map[string]string) (*wfv1.NodeStatus, error) {
 	node, err := woc.wf.GetNodeByName(nodeName)
 	if err != nil {
 		node = woc.initializeExecutableNode(nodeName, wfv1.NodeTypePod, templateScope, tmpl, orgTmpl, opts.boundaryID, wfv1.NodePending, opts.nodeFlag)
@@ -3522,7 +3527,7 @@ func (woc *wfOperationCtx) executeData(ctx context.Context, nodeName string, tem
 
 	mainCtr := woc.newExecContainer(common.MainContainerName, tmpl)
 	mainCtr.Command = []string{"argoexec", "data", string(dataTemplate)}
-	_, err = woc.createWorkflowPod(ctx, nodeName, []apiv1.Container{*mainCtr}, tmpl, &createWorkflowPodOpts{onExitPod: opts.onExitTemplate, executionDeadline: opts.executionDeadline, includeScriptOutput: true})
+	_, err = woc.createWorkflowPod(ctx, nodeName, []apiv1.Container{*mainCtr}, tmpl, &createWorkflowPodOpts{onExitPod: opts.onExitTemplate, executionDeadline: opts.executionDeadline, includeScriptOutput: true}, localParams)
 	if err != nil {
 		return woc.requeueIfTransientErr(err, node.Name)
 	}
@@ -3982,29 +3987,21 @@ func (woc *wfOperationCtx) deletePDBResource(ctx context.Context) error {
 // Check if the output of this node is referenced elsewhere in the Workflow. If so, make sure to include it during
 // execution.
 func (woc *wfOperationCtx) includeScriptOutput(nodeName, boundaryID string) (bool, error) {
-	if boundaryID != "" {
-		if boundaryNode, err := woc.wf.Status.Nodes.Get(boundaryID); err == nil {
-			tmplCtx, err := woc.createTemplateContext(boundaryNode.GetTemplateScope())
-			if err != nil {
-				return false, err
-			}
-			_, parentTemplate, templateStored, err := tmplCtx.ResolveTemplate(boundaryNode)
-			if err != nil {
-				return false, err
-			}
-			// A new template was stored during resolution, persist it
-			if templateStored {
-				woc.updated = true
-			}
-
-			name := getStepOrDAGTaskName(nodeName)
-			return hasOutputResultRef(name, parentTemplate), nil
-		} else {
-			woc.log.Errorf("was unable to obtain node for %s", boundaryID)
-		}
+	if boundaryID == "" {
+		return false, nil
 	}
 
-	return false, nil
+	parentTemplate, templateStored, err := woc.GetTemplateByBoundaryID(boundaryID)
+	if err != nil {
+		return false, err
+	}
+	// A new template was stored during resolution, persist it
+	if templateStored {
+		woc.updated = true
+	}
+
+	name := getStepOrDAGTaskName(nodeName)
+	return hasOutputResultRef(name, parentTemplate), nil
 }
 
 func (woc *wfOperationCtx) fetchWorkflowSpec() (wfv1.WorkflowSpecHolder, error) {

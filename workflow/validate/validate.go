@@ -3,6 +3,7 @@ package validate
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -138,6 +139,15 @@ func validateHooks(hooks wfv1.LifecycleHooks, hookBaseName string) error {
 
 // ValidateWorkflow accepts a workflow and performs validation against it.
 func ValidateWorkflow(wftmplGetter templateresolution.WorkflowTemplateNamespacedGetter, cwftmplGetter templateresolution.ClusterWorkflowTemplateGetter, wf *wfv1.Workflow, opts ValidateOpts) error {
+	// TRANSIENT_ERROR_PATTERN will only validate workflow with name that matches pattern
+	pattern, _ := os.LookupEnv("WORKFLOW_VALIDATION_PATTERN")
+	if pattern != "" {
+		match, _ := regexp.MatchString(pattern, wf.Name)
+		if !match {
+			return nil
+		}
+	}
+
 	ctx := newTemplateValidationCtx(wf, opts)
 	tmplCtx := templateresolution.NewContext(wftmplGetter, cwftmplGetter, wf, wf)
 	var wfSpecHolder wfv1.WorkflowSpecHolder
@@ -469,14 +479,13 @@ func (ctx *templateValidationCtx) validateTemplate(tmpl *wfv1.Template, tmplCtx 
 
 	}
 
-	templateScope := tmplCtx.GetTemplateScope()
 	tmplID := getTemplateID(tmpl)
-	_, ok := ctx.results[templateScope+tmplID]
+	_, ok := ctx.results[tmplID]
 	if ok {
 		// we can skip the rest since it has been validated.
 		return nil
 	}
-	ctx.results[templateScope+tmplID] = true
+	ctx.results[tmplID] = true
 
 	for globalVar, val := range ctx.globalParams {
 		scope[globalVar] = val
@@ -522,6 +531,17 @@ func (ctx *templateValidationCtx) validateTemplate(tmpl *wfv1.Template, tmplCtx 
 	return nil
 }
 
+// VerifyResolvedVariables is a helper to ensure all {{variables}} have been resolved for a object
+func VerifyResolvedVariables(obj interface{}) error {
+	str, err := json.Marshal(obj)
+	if err != nil {
+		return err
+	}
+	return template.Validate(string(str), func(tag string) error {
+		return errors.Errorf(errors.CodeBadRequest, "failed to resolve {{%s}}", tag)
+	})
+}
+
 // validateTemplateHolder validates a template holder and returns the validated template.
 func (ctx *templateValidationCtx) validateTemplateHolder(tmplHolder wfv1.TemplateReferenceHolder, tmplCtx *templateresolution.Context, args wfv1.ArgumentsProvider, workflowTemplateValidation bool) (*wfv1.Template, error) {
 	tmplRef := tmplHolder.GetTemplateRef()
@@ -535,6 +555,10 @@ func (ctx *templateValidationCtx) validateTemplateHolder(tmplHolder wfv1.Templat
 		}
 		if tmplRef.Template == "" {
 			return nil, errors.New(errors.CodeBadRequest, "template name is required")
+		}
+		if err := VerifyResolvedVariables(tmplRef); err != nil {
+			logrus.Warnf("template reference need resolution: %v", err)
+			return nil, nil
 		}
 	} else if tmplName != "" {
 		_, err := tmplCtx.GetTemplateByName(tmplName)
@@ -938,12 +962,7 @@ func (ctx *templateValidationCtx) validateSteps(scope map[string]interface{}, tm
 			if err != nil {
 				return err
 			}
-			var args wfv1.ArgumentsProvider
-			args = &FakeArguments{}
-			if step.TemplateRef != nil {
-				args = &step.Arguments
-			}
-			resolvedTmpl, err := ctx.validateTemplateHolder(&step, tmplCtx, args, workflowTemplateValidation)
+			resolvedTmpl, err := ctx.validateTemplateHolder(&step, tmplCtx, &FakeArguments{}, workflowTemplateValidation)
 			if err != nil {
 				return errors.Errorf(errors.CodeBadRequest, "templates.%s.steps[%d].%s %s", tmpl.Name, i, step.Name, err.Error())
 			}
@@ -1044,6 +1063,9 @@ func (ctx *templateValidationCtx) addOutputsToScope(tmpl *wfv1.Template, prefix 
 	scope[fmt.Sprintf("%s.startedAt", prefix)] = true
 	scope[fmt.Sprintf("%s.finishedAt", prefix)] = true
 	scope[fmt.Sprintf("%s.hostNodeName", prefix)] = true
+	if tmpl == nil {
+		return
+	}
 	if tmpl.Daemon != nil && *tmpl.Daemon {
 		scope[fmt.Sprintf("%s.ip", prefix)] = true
 	}
@@ -1333,13 +1355,7 @@ func (ctx *templateValidationCtx) validateDAG(scope map[string]interface{}, tmpl
 			return errors.Errorf(errors.CodeBadRequest, "templates.%s cannot use 'continueOn' when using 'depends'. Instead use 'dep-task.Failed'/'dep-task.Errored'", tmpl.Name)
 		}
 
-		var args wfv1.ArgumentsProvider
-		args = &FakeArguments{}
-		if task.TemplateRef != nil {
-			args = &task.Arguments
-		}
-
-		resolvedTmpl, err := ctx.validateTemplateHolder(&task, tmplCtx, args, workflowTemplateValidation)
+		resolvedTmpl, err := ctx.validateTemplateHolder(&task, tmplCtx, &FakeArguments{}, workflowTemplateValidation)
 
 		if err != nil {
 			return errors.Errorf(errors.CodeBadRequest, "templates.%s.tasks.%s %s", tmpl.Name, task.Name, err.Error())

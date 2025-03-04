@@ -26,6 +26,7 @@ import (
 	"github.com/argoproj/argo-workflows/v3/workflow/controller/entrypoint"
 	"github.com/argoproj/argo-workflows/v3/workflow/controller/indexes"
 	"github.com/argoproj/argo-workflows/v3/workflow/util"
+	"github.com/argoproj/argo-workflows/v3/workflow/validate"
 )
 
 var (
@@ -75,7 +76,7 @@ type createWorkflowPodOpts struct {
 	executionDeadline   time.Time
 }
 
-func (woc *wfOperationCtx) createWorkflowPod(ctx context.Context, nodeName string, mainCtrs []apiv1.Container, tmpl *wfv1.Template, opts *createWorkflowPodOpts) (*apiv1.Pod, error) {
+func (woc *wfOperationCtx) createWorkflowPod(ctx context.Context, nodeName string, mainCtrs []apiv1.Container, tmpl *wfv1.Template, opts *createWorkflowPodOpts, localParams map[string]string) (*apiv1.Pod, error) {
 	nodeID := woc.wf.NodeID(nodeName)
 
 	// we must check to see if the pod exists rather than just optimistically creating the pod and see if we get
@@ -232,7 +233,7 @@ func (woc *wfOperationCtx) createWorkflowPod(ctx context.Context, nodeName strin
 	initCtr := woc.newInitContainer(tmpl)
 	pod.Spec.InitContainers = []apiv1.Container{initCtr}
 
-	addSchedulingConstraints(pod, wfSpec, tmpl)
+	woc.addSchedulingConstraints(pod, wfSpec, tmpl, nodeName)
 	woc.addMetadata(pod, tmpl)
 
 	// Set initial progress from pod metadata if exists.
@@ -332,7 +333,7 @@ func (woc *wfOperationCtx) createWorkflowPod(ctx context.Context, nodeName strin
 					return nil, err
 				}
 				for _, obj := range []interface{}{tmpl.ArchiveLocation} {
-					err = verifyResolvedVariables(obj)
+					err = validate.VerifyResolvedVariables(obj)
 					if err != nil {
 						return nil, err
 					}
@@ -345,10 +346,6 @@ func (woc *wfOperationCtx) createWorkflowPod(ctx context.Context, nodeName strin
 	var podSpecPatchs []string
 	if woc.execWf.Spec.HasPodSpecPatch() {
 		// Final substitution for workflow level PodSpecPatch
-		localParams := make(map[string]string)
-		if tmpl.IsPodType() {
-			localParams[common.LocalVarPodName] = pod.Name
-		}
 		newTmpl := tmpl.DeepCopy()
 		newTmpl.PodSpecPatch = woc.execWf.Spec.PodSpecPatch
 		processedTmpl, err := common.ProcessArgs(newTmpl, &wfv1.Arguments{}, woc.globalParams, localParams, false, woc.wf.Namespace, woc.controller.configMapInformer.GetIndexer())
@@ -688,22 +685,33 @@ func (woc *wfOperationCtx) addDNSConfig(pod *apiv1.Pod) {
 }
 
 // addSchedulingConstraints applies any node selectors or affinity rules to the pod, either set in the workflow or the template
-func addSchedulingConstraints(pod *apiv1.Pod, wfSpec *wfv1.WorkflowSpec, tmpl *wfv1.Template) {
+func (woc *wfOperationCtx) addSchedulingConstraints(pod *apiv1.Pod, wfSpec *wfv1.WorkflowSpec, tmpl *wfv1.Template, nodeName string) {
+	// Get boundaryNode Template (if specified)
+	boundaryTemplate, err := woc.GetBoundaryTemplate(nodeName)
+	if err != nil {
+		woc.log.Warnf("couldn't get boundaryTemplate through nodeName %s", nodeName)
+	}
 	// Set nodeSelector (if specified)
 	if len(tmpl.NodeSelector) > 0 {
 		pod.Spec.NodeSelector = tmpl.NodeSelector
+	} else if boundaryTemplate != nil && len(boundaryTemplate.NodeSelector) > 0 {
+		pod.Spec.NodeSelector = boundaryTemplate.NodeSelector
 	} else if len(wfSpec.NodeSelector) > 0 {
 		pod.Spec.NodeSelector = wfSpec.NodeSelector
 	}
 	// Set affinity (if specified)
 	if tmpl.Affinity != nil {
 		pod.Spec.Affinity = tmpl.Affinity
+	} else if boundaryTemplate != nil && boundaryTemplate.Affinity != nil {
+		pod.Spec.Affinity = boundaryTemplate.Affinity
 	} else if wfSpec.Affinity != nil {
 		pod.Spec.Affinity = wfSpec.Affinity
 	}
 	// Set tolerations (if specified)
 	if len(tmpl.Tolerations) > 0 {
 		pod.Spec.Tolerations = tmpl.Tolerations
+	} else if boundaryTemplate != nil && len(boundaryTemplate.Tolerations) > 0 {
+		pod.Spec.Tolerations = boundaryTemplate.Tolerations
 	} else if len(wfSpec.Tolerations) > 0 {
 		pod.Spec.Tolerations = wfSpec.Tolerations
 	}
@@ -737,6 +745,37 @@ func addSchedulingConstraints(pod *apiv1.Pod, wfSpec *wfv1.WorkflowSpec, tmpl *w
 	} else if wfSpec.SecurityContext != nil {
 		pod.Spec.SecurityContext = wfSpec.SecurityContext
 	}
+}
+
+// GetBoundaryTemplate get a template through the nodeName
+func (woc *wfOperationCtx) GetBoundaryTemplate(nodeName string) (*wfv1.Template, error) {
+	node, err := woc.wf.GetNodeByName(nodeName)
+	if err != nil {
+		woc.log.Warnf("couldn't retrieve node for nodeName %s, will get nil templateDeadline", nodeName)
+		return nil, err
+	}
+	boundaryTmpl, _, err := woc.GetTemplateByBoundaryID(node.BoundaryID)
+	if err != nil {
+		return nil, err
+	}
+	return boundaryTmpl, nil
+}
+
+// GetTemplateByBoundaryID get a template through the node's BoundaryID.
+func (woc *wfOperationCtx) GetTemplateByBoundaryID(boundaryID string) (*wfv1.Template, bool, error) {
+	boundaryNode, err := woc.wf.Status.Nodes.Get(boundaryID)
+	if err != nil {
+		return nil, false, err
+	}
+	tmplCtx, err := woc.createTemplateContext(boundaryNode.GetTemplateScope())
+	if err != nil {
+		return nil, false, err
+	}
+	_, boundaryTmpl, templateStored, err := tmplCtx.ResolveTemplate(boundaryNode)
+	if err != nil {
+		return nil, templateStored, err
+	}
+	return boundaryTmpl, templateStored, nil
 }
 
 // addVolumeReferences adds any volumeMounts that a container/sidecar is referencing, to the pod.spec.volumes
@@ -1107,17 +1146,6 @@ func addSidecars(pod *apiv1.Pod, tmpl *wfv1.Template) {
 		}
 		pod.Spec.Containers = append(pod.Spec.Containers, sidecar.Container)
 	}
-}
-
-// verifyResolvedVariables is a helper to ensure all {{variables}} have been resolved for a object
-func verifyResolvedVariables(obj interface{}) error {
-	str, err := json.Marshal(obj)
-	if err != nil {
-		return err
-	}
-	return template.Validate(string(str), func(tag string) error {
-		return errors.Errorf(errors.CodeBadRequest, "failed to resolve {{%s}}", tag)
-	})
 }
 
 // createSecretVolumesAndMounts will retrieve and create Volumes and Volumemount object for Pod
