@@ -201,6 +201,11 @@ func (we *WorkflowExecutor) LoadArtifacts(ctx context.Context) error {
 		// the file is a tarball or not. If it is, it is first extracted then renamed to
 		// the desired location. If not, it is simply renamed to the location.
 		tempArtPath := artPath + ".tmp"
+		// Ensure parent directory exist, create if missing
+		tempArtDir := filepath.Dir(tempArtPath)
+		if err := os.MkdirAll(tempArtDir, 0o700); err != nil {
+			return fmt.Errorf("failed to create artifact temporary parent directory %s: %w", tempArtDir, err)
+		}
 		err = artDriver.Load(driverArt, tempArtPath)
 		if err != nil {
 			if art.Optional && argoerrs.IsCode(argoerrs.CodeNotFound, err) {
@@ -801,7 +806,7 @@ func (we *WorkflowExecutor) reportResult(ctx context.Context, result wfv1.NodeRe
 	}, errorsutil.IsTransientErr, func() error {
 		err := we.upsertTaskResult(ctx, result)
 		if apierr.IsForbidden(err) {
-			log.WithError(err).Warn("failed to patch task set, falling back to legacy/insecure pod patch, see https://argoproj.github.io/argo-workflows/workflow-rbac/")
+			log.WithError(err).Warn("failed to patch task set, falling back to legacy/insecure pod patch, see https://argo-workflows.readthedocs.io/en/release-3.4/workflow-rbac/")
 			if result.Outputs.HasOutputs() {
 				value, err := json.Marshal(result.Outputs)
 				if err != nil {
@@ -918,6 +923,9 @@ func untar(tarPath string, destPath string) error {
 					return err
 				}
 				if err := f.Close(); err != nil {
+					return err
+				}
+				if err := os.Chtimes(target, header.AccessTime, header.ModTime); err != nil {
 					return err
 				}
 			}

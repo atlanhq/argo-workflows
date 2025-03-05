@@ -651,30 +651,32 @@ func resolveAllVariables(scope map[string]interface{}, globalParams map[string]s
 	_, allowAllWorkflowOutputParameterRefs := scope[anyWorkflowOutputParameterMagicValue]
 	_, allowAllWorkflowOutputArtifactRefs := scope[anyWorkflowOutputArtifactMagicValue]
 	return template.Validate(tmplStr, func(tag string) error {
+		// Trim the tag to check the validations
+		trimmedTag := strings.TrimSpace(tag)
 		// Skip the custom variable references
-		if !checkValidWorkflowVariablePrefix(tag) {
+		if !checkValidWorkflowVariablePrefix(trimmedTag) {
 			return nil
 		}
-		_, ok := scope[tag]
-		_, isGlobal := globalParams[tag]
+		_, ok := scope[trimmedTag]
+		_, isGlobal := globalParams[trimmedTag]
 		if !ok && !isGlobal {
-			if (tag == "item" || strings.HasPrefix(tag, "item.")) && allowAllItemRefs {
+			if (trimmedTag == "item" || strings.HasPrefix(trimmedTag, "item.")) && allowAllItemRefs {
 				// we are *probably* referencing a undetermined item using withParam
 				// NOTE: this is far from foolproof.
-			} else if strings.HasPrefix(tag, "workflow.outputs.parameters.") && allowAllWorkflowOutputParameterRefs {
+			} else if strings.HasPrefix(trimmedTag, "workflow.outputs.parameters.") && allowAllWorkflowOutputParameterRefs {
 				// Allow runtime resolution of workflow output parameter names
-			} else if strings.HasPrefix(tag, "workflow.outputs.artifacts.") && allowAllWorkflowOutputArtifactRefs {
+			} else if strings.HasPrefix(trimmedTag, "workflow.outputs.artifacts.") && allowAllWorkflowOutputArtifactRefs {
 				// Allow runtime resolution of workflow output artifact names
-			} else if strings.HasPrefix(tag, "outputs.") {
+			} else if strings.HasPrefix(trimmedTag, "outputs.") {
 				// We are self referencing for metric emission, allow it.
-			} else if strings.HasPrefix(tag, common.GlobalVarWorkflowCreationTimestamp) {
-			} else if strings.HasPrefix(tag, common.GlobalVarWorkflowCronScheduleTime) {
+			} else if strings.HasPrefix(trimmedTag, common.GlobalVarWorkflowCreationTimestamp) {
+			} else if strings.HasPrefix(trimmedTag, common.GlobalVarWorkflowCronScheduleTime) {
 				// Allow runtime resolution for "scheduledTime" which will pass from CronWorkflow
-			} else if strings.HasPrefix(tag, common.GlobalVarWorkflowDuration) {
-			} else if strings.HasPrefix(tag, "tasks.name") {
-			} else if strings.HasPrefix(tag, "steps.name") {
-			} else if strings.HasPrefix(tag, "node.name") {
-			} else if strings.HasPrefix(tag, "workflow.parameters") && workflowTemplateValidation {
+			} else if strings.HasPrefix(trimmedTag, common.GlobalVarWorkflowDuration) {
+			} else if strings.HasPrefix(trimmedTag, "tasks.name") {
+			} else if strings.HasPrefix(trimmedTag, "steps.name") {
+			} else if strings.HasPrefix(trimmedTag, "node.name") {
+			} else if strings.HasPrefix(trimmedTag, "workflow.parameters") && workflowTemplateValidation {
 				// If we are simply validating a WorkflowTemplate in isolation, some of the parameters may come from the Workflow that uses it
 			} else {
 				return fmt.Errorf("failed to resolve {{%s}}", tag)
@@ -851,16 +853,32 @@ func validateArgumentsFieldNames(prefix string, arguments wfv1.Arguments) error 
 // validateArgumentsValues ensures that all arguments have parameter values or artifact locations
 func validateArgumentsValues(prefix string, arguments wfv1.Arguments, allowEmptyValues bool) error {
 	for _, param := range arguments.Parameters {
+		// check if any value is defined
 		if param.ValueFrom == nil && param.Value == nil {
 			if !allowEmptyValues {
-				return errors.Errorf(errors.CodeBadRequest, "%s%s.value is required", prefix, param.Name)
+				return errors.Errorf(errors.CodeBadRequest, "%s%s.value or %s%s.valueFrom is required", prefix, param.Name, prefix, param.Name)
 			}
 		}
+		if param.ValueFrom != nil {
+			// check for valid valueFrom sub-parameters
+			// INFO: default needs to be accompanied by ConfigMapKeyRef.
+			if param.ValueFrom.ConfigMapKeyRef == nil && param.ValueFrom.Event == "" && param.ValueFrom.Supplied == nil {
+				return errors.Errorf(errors.CodeBadRequest, "%s%s.valueFrom only allows: default, configMapKeyRef and supplied", prefix, param.Name)
+			}
+			// check for invalid valueFrom sub-parameters
+			if param.ValueFrom.Path != "" || param.ValueFrom.JSONPath != "" || param.ValueFrom.Parameter != "" || param.ValueFrom.Expression != "" {
+				return errors.Errorf(errors.CodeBadRequest, "%s%s.valueFrom only allows: default, configMapKeyRef and supplied", prefix, param.Name)
+			}
+		}
+		// validate enum
 		if param.Enum != nil {
 			if len(param.Enum) == 0 {
 				return errors.Errorf(errors.CodeBadRequest, "%s%s.enum should contain at least one value", prefix, param.Name)
 			}
 			if param.Value == nil {
+				if allowEmptyValues {
+					return nil
+				}
 				return errors.Errorf(errors.CodeBadRequest, "%s%s.value is required", prefix, param.Name)
 			}
 			valueSpecifiedInEnumList := false
@@ -1414,10 +1432,7 @@ func validateDAGTaskArgumentDependency(arguments wfv1.Arguments, ancestry []stri
 	}
 
 	for _, param := range arguments.Parameters {
-		if param.Value == nil {
-			return errors.Errorf(errors.CodeBadRequest, "missing value for parameter '%s'", param.Name)
-		}
-		if strings.HasPrefix(param.Value.String(), "{{tasks.") {
+		if param.Value != nil && strings.HasPrefix(param.Value.String(), "{{tasks.") {
 			// All parameter values should have been validated, so
 			// index 1 should exist.
 			refTaskName := strings.Split(param.Value.String(), ".")[1]

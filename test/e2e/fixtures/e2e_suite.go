@@ -48,6 +48,7 @@ type E2ESuite struct {
 	wfClient          v1alpha1.WorkflowInterface
 	wfebClient        v1alpha1.WorkflowEventBindingInterface
 	wfTemplateClient  v1alpha1.WorkflowTemplateInterface
+	wftsClient        v1alpha1.WorkflowTaskSetInterface
 	cwfTemplateClient v1alpha1.ClusterWorkflowTemplateInterface
 	cronClient        v1alpha1.CronWorkflowInterface
 	KubeClient        kubernetes.Interface
@@ -71,6 +72,7 @@ func (s *E2ESuite) SetupSuite() {
 	s.wfClient = versioned.NewForConfigOrDie(s.RestConfig).ArgoprojV1alpha1().Workflows(Namespace)
 	s.wfebClient = versioned.NewForConfigOrDie(s.RestConfig).ArgoprojV1alpha1().WorkflowEventBindings(Namespace)
 	s.wfTemplateClient = versioned.NewForConfigOrDie(s.RestConfig).ArgoprojV1alpha1().WorkflowTemplates(Namespace)
+	s.wftsClient = versioned.NewForConfigOrDie(s.RestConfig).ArgoprojV1alpha1().WorkflowTaskSets(Namespace)
 	s.cronClient = versioned.NewForConfigOrDie(s.RestConfig).ArgoprojV1alpha1().CronWorkflows(Namespace)
 	s.Persistence = newPersistence(s.KubeClient, s.Config)
 	s.hydrator = hydrator.New(s.Persistence.offloadNodeStatusRepo)
@@ -83,7 +85,7 @@ func (s *E2ESuite) TearDownSuite() {
 		_, _ = fmt.Println(color.Ize(color.Yellow, fmt.Sprintf("=== SLOW TEST:  %s", x)))
 	}
 	if s.T().Failed() {
-		s.T().Log("to learn how to diagnose failed tests: https://argoproj.github.io/argo-workflows/running-locally/#running-e2e-tests-locally")
+		s.T().Log("to learn how to diagnose failed tests: https://argo-workflows.readthedocs.io/en/release-3.4/running-locally/#running-e2e-tests-locally")
 	}
 }
 
@@ -207,6 +209,7 @@ func (s *E2ESuite) Given() *Given {
 		client:            s.wfClient,
 		wfebClient:        s.wfebClient,
 		wfTemplateClient:  s.wfTemplateClient,
+		wftsClient:        s.wftsClient,
 		cwfTemplateClient: s.cwfTemplateClient,
 		cronClient:        s.cronClient,
 		hydrator:          s.hydrator,

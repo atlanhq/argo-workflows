@@ -36,7 +36,7 @@ E2E_PARALLEL          ?= 20
 E2E_SUITE_TIMEOUT     ?= 15m
 
 VERSION               := latest
-DOCKER_PUSH           := false
+DOCKER_PUSH           ?= false
 
 # VERSION is the version to be used for files in manifests and should always be latest unless we are releasing
 # we assume HEAD means you are on a tag
@@ -413,7 +413,7 @@ lint: server/static/files.go $(GOPATH)/bin/golangci-lint
 	# Tidy Go modules
 	go mod tidy
 	# Lint Go files
-	$(GOPATH)/bin/golangci-lint run --fix --verbose
+	$(GOPATH)/bin/golangci-lint run --fix --verbose -c .golangci.yml
 	# Lint the UI
 	if [ -e ui/node_modules ]; then yarn --cwd ui lint ; fi
 
@@ -442,12 +442,33 @@ endif
 
 .PHONY: argosay
 argosay:
-	cd test/e2e/images/argosay/v2 && docker build . -t argoproj/argosay:v2
+ifeq ($(DOCKER_PUSH),true)
+	cd test/e2e/images/argosay/v2 && \
+		docker buildx build \
+			--platform linux/amd64,linux/arm64 \
+			-t argoproj/argosay:v2 \
+			--push \
+			.
+else
+	cd test/e2e/images/argosay/v2 && \
+		docker build . -t argoproj/argosay:v2
+endif
 ifeq ($(K3D),true)
 	k3d image import -c $(K3D_CLUSTER_NAME) argoproj/argosay:v2
 endif
+
+.PHONY: argosayv1
+argosayv1:
 ifeq ($(DOCKER_PUSH),true)
-	docker push argoproj/argosay:v2
+	cd test/e2e/images/argosay/v1 && \
+		docker buildx build \
+			--platform linux/amd64,linux/arm64 \
+			-t argoproj/argosay:v1 \
+			--push \
+			.
+else
+	cd test/e2e/images/argosay/v1 && \
+		docker build . -t argoproj/argosay:v1
 endif
 
 dist/argosay:
@@ -618,7 +639,7 @@ docs/cli/argo.md: $(CLI_PKGS) go.sum server/static/files.go hack/cli/main.go
 .PHONY: docs-spellcheck
 docs-spellcheck: /usr/local/bin/mdspell
 	# check docs for spelling mistakes
-	mdspell --ignore-numbers --ignore-acronyms --en-us --no-suggestions --report $(shell find docs -name '*.md' -not -name upgrading.md -not -name fields.md -not -name upgrading.md -not -name executor_swagger.md -not -path '*/cli/*')
+	mdspell --ignore-numbers --ignore-acronyms --en-us --no-suggestions --report $(shell find docs -name '*.md' -not -name upgrading.md -not -name fields.md -not -name upgrading.md -not -name swagger.md -not -name executor_swagger.md -not -path '*/cli/*')
 
 /usr/local/bin/markdown-link-check:
 	npm i -g markdown-link-check
@@ -626,7 +647,7 @@ docs-spellcheck: /usr/local/bin/mdspell
 .PHONY: docs-linkcheck
 docs-linkcheck: /usr/local/bin/markdown-link-check
 	# check docs for broken links
-	markdown-link-check -q -c .mlc_config.json $(shell find docs -name '*.md' -not -name fields.md -not -name executor_swagger.md)
+	markdown-link-check -q -c .mlc_config.json $(shell find docs -name '*.md' -not -name fields.md -not -name swagger.md -not -name executor_swagger.md)
 
 /usr/local/bin/markdownlint:
 	npm i -g  markdownlint-cli
@@ -634,10 +655,10 @@ docs-linkcheck: /usr/local/bin/markdown-link-check
 .PHONY: docs-lint
 docs-lint: /usr/local/bin/markdownlint
 	# lint docs
-	markdownlint docs --fix --ignore docs/fields.md --ignore docs/executor_swagger.md --ignore docs/cli --ignore docs/walk-through/the-structure-of-workflow-specs.md
+	markdownlint docs --fix --ignore docs/fields.md --ignore docs/executor_swagger.md --ignore docs/swagger.md --ignore docs/cli --ignore docs/walk-through/the-structure-of-workflow-specs.md
 
 /usr/local/bin/mkdocs:
-	python -m pip install mkdocs==1.2.4 mkdocs_material==8.1.9  mkdocs-spellcheck==0.2.1
+	python -m pip install --no-cache-dir -r docs/requirements.txt
 
 .PHONY: docs
 docs: /usr/local/bin/mkdocs \
@@ -651,8 +672,6 @@ docs: /usr/local/bin/mkdocs \
 	./hack/check-mkdocs.sh
 	# build the docs
 	mkdocs build
-	# fix the fields.md document
-	go run -tags fields ./hack parseexamples
 	# tell the user the fastest way to edit docs
 	@echo "ℹ️ If you want to preview you docs, open site/index.html. If you want to edit them with hot-reload, run 'make docs-serve' to start mkdocs on port 8000"
 

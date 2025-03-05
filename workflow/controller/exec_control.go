@@ -21,9 +21,10 @@ func (woc *wfOperationCtx) applyExecutionControl(pod *apiv1.Pod, wfNodesLock *sy
 
 	nodeID := woc.nodeID(pod)
 	wfNodesLock.RLock()
-	node, ok := woc.wf.Status.Nodes[nodeID]
+	node, err := woc.wf.Status.Nodes.Get(nodeID)
 	wfNodesLock.RUnlock()
-	if !ok {
+	if err != nil {
+		woc.log.Errorf("was unable to obtain node for %s", nodeID)
 		return
 	}
 	// node is already completed
@@ -79,7 +80,11 @@ func (woc *wfOperationCtx) handleExecutionControlError(nodeID string, wfNodesLoc
 	wfNodesLock.Lock()
 	defer wfNodesLock.Unlock()
 
-	node := woc.wf.Status.Nodes[nodeID]
+	node, err := woc.wf.Status.Nodes.Get(nodeID)
+	if err != nil {
+		woc.log.Errorf("was not abble to obtain node for %s", nodeID)
+		return
+	}
 	woc.markNodePhase(node.Name, wfv1.NodeFailed, errorMsg)
 
 	children, err := woc.wf.Status.Nodes.NestedChildrenStatus(nodeID)
@@ -99,7 +104,9 @@ func (woc *wfOperationCtx) handleExecutionControlError(nodeID string, wfNodesLoc
 
 // killDaemonedChildren kill any daemoned pods of a steps or DAG template node.
 func (woc *wfOperationCtx) killDaemonedChildren(nodeID string) {
-	woc.log.Infof("Checking daemoned children of %s", nodeID)
+	if nodeID != "" {
+		woc.log.Debugf("Checking daemoned children of %s", nodeID)
+	}
 	for _, childNode := range woc.wf.Status.Nodes {
 		if childNode.BoundaryID != nodeID {
 			continue
@@ -111,7 +118,7 @@ func (woc *wfOperationCtx) killDaemonedChildren(nodeID string) {
 		woc.controller.queuePodForCleanup(woc.wf.Namespace, podName, terminateContainers)
 		childNode.Phase = wfv1.NodeSucceeded
 		childNode.Daemoned = nil
-		woc.wf.Status.Nodes[childNode.ID] = childNode
+		woc.wf.Status.Nodes.Set(childNode.ID, childNode)
 		woc.updated = true
 	}
 }

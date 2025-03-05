@@ -1,5 +1,5 @@
 import {Tabs, Ticker, Tooltip} from 'argo-ui';
-import * as moment from 'moment';
+import moment from 'moment';
 import * as React from 'react';
 
 import * as models from '../../../../models';
@@ -68,7 +68,7 @@ interface Props {
 const AttributeRow = (attr: {title: string; value: any}) => (
     <React.Fragment key={attr.title}>
         <div>{attr.title}</div>
-        <div style={{overflow: 'auto hidden'}}>{attr.value}</div>
+        <div>{attr.value}</div>
     </React.Fragment>
 );
 const AttributeRows = (props: {attributes: {title: string; value: any}[]}) => (

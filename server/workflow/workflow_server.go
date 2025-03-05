@@ -285,7 +285,7 @@ func (s *workflowServer) WatchEvents(req *workflowpkg.WatchEventsRequest, ws wor
 			log.Debug("Received event")
 			e, ok := event.Object.(*corev1.Event)
 			if !ok {
-				// object is probably probably metav1.Status, `FromObject` can deal with anything
+				// object is probably metav1.Status, `FromObject` can deal with anything
 				return sutils.ToStatusError(apierr.FromObject(event.Object), codes.Internal)
 			}
 			log.Debug("Sending event")
@@ -377,7 +377,7 @@ func (s *workflowServer) ResubmitWorkflow(ctx context.Context, req *workflowpkg.
 		return nil, sutils.ToStatusError(err, codes.InvalidArgument)
 	}
 
-	newWF, err := util.FormulateResubmitWorkflow(wf, req.Memoized, req.Parameters)
+	newWF, err := util.FormulateResubmitWorkflow(ctx, wf, req.Memoized, req.Parameters)
 	if err != nil {
 		return nil, sutils.ToStatusError(err, codes.Internal)
 	}
@@ -606,7 +606,7 @@ func getLatestWorkflow(ctx context.Context, wfClient versioned.Interface, namesp
 		return nil, sutils.ToStatusError(err, codes.Internal)
 	}
 	if len(wfList.Items) < 1 {
-		return nil, sutils.ToStatusError(fmt.Errorf("No workflows found."), codes.NotFound)
+		return nil, sutils.ToStatusError(fmt.Errorf("no workflows found"), codes.NotFound)
 	}
 	latest := wfList.Items[0]
 	for _, wf := range wfList.Items {
@@ -651,6 +651,23 @@ func (s *workflowServer) SubmitWorkflow(ctx context.Context, req *workflowpkg.Wo
 	if err != nil {
 		return nil, sutils.ToStatusError(err, codes.InvalidArgument)
 	}
+
+	// if we are doing a normal dryRun, just return the workflow un-altered
+	if req.SubmitOptions != nil && req.SubmitOptions.DryRun {
+		return wf, nil
+	}
+	if req.SubmitOptions != nil && req.SubmitOptions.ServerDryRun {
+		// For a server dry run we require a namespace
+		if wf.Namespace == "" {
+			wf.Namespace = req.Namespace
+		}
+		workflow, err := util.CreateServerDryRun(ctx, wf, wfClient)
+		if err != nil {
+			return nil, sutils.ToStatusError(err, codes.InvalidArgument)
+		}
+		return workflow, nil
+	}
+
 	wf, err = wfClient.ArgoprojV1alpha1().Workflows(req.Namespace).Create(ctx, wf, metav1.CreateOptions{})
 	if err != nil {
 		return nil, sutils.ToStatusError(err, codes.InvalidArgument)

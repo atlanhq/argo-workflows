@@ -138,7 +138,7 @@ See %s`, help.ArgoServer),
 				}
 
 			} else {
-				log.Warn("You are running in insecure mode. Learn how to enable transport layer security: https://argoproj.github.io/argo-workflows/tls/")
+				log.Warn("You are running in insecure mode. Learn how to enable transport layer security: https://argo-workflows.readthedocs.io/en/release-3.4/tls/")
 			}
 
 			modes := auth.Modes{}
@@ -149,7 +149,7 @@ See %s`, help.ArgoServer),
 				}
 			}
 			if reflect.DeepEqual(modes, auth.Modes{auth.Server: true}) {
-				log.Warn("You are running without client authentication. Learn how to enable client authentication: https://argoproj.github.io/argo-workflows/argo-server-auth-mode/")
+				log.Warn("You are running without client authentication. Learn how to enable client authentication: https://argo-workflows.readthedocs.io/en/release-3.4/argo-server-auth-mode/")
 			}
 
 			opts := apiserver.ArgoServerOpts{
@@ -237,12 +237,15 @@ See %s`, help.ArgoServer),
 	command.Flags().Float32Var(&kubeAPIQPS, "kube-api-qps", 20.0, "QPS to use while talking with kube-apiserver.")
 	command.Flags().IntVar(&kubeAPIBurst, "kube-api-burst", 30, "Burst to use while talking with kube-apiserver.")
 
+	// set-up env vars for the CLI such that ARGO_* env vars can be used instead of flags
 	viper.AutomaticEnv()
 	viper.SetEnvPrefix("ARGO")
 	viper.SetEnvKeyReplacer(strings.NewReplacer("-", "_", ".", "_"))
+	// bind flags to env vars (https://github.com/spf13/viper/tree/v1.17.0#working-with-flags)
 	if err := viper.BindPFlags(command.Flags()); err != nil {
 		log.Fatal(err)
 	}
+	// workaround for handling required flags (https://github.com/spf13/viper/issues/397#issuecomment-544272457)
 	command.Flags().VisitAll(func(f *pflag.Flag) {
 		if !f.Changed && viper.IsSet(f.Name) {
 			val := viper.Get(f.Name)

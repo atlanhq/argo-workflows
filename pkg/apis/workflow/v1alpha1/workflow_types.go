@@ -22,6 +22,8 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/wait"
 
+	log "github.com/sirupsen/logrus"
+
 	argoerrs "github.com/argoproj/argo-workflows/v3/errors"
 	"github.com/argoproj/argo-workflows/v3/util/slice"
 )
@@ -288,9 +290,7 @@ type WorkflowSpec struct {
 	// VolumeClaimTemplates is a list of claims that containers are allowed to reference.
 	// The Workflow controller will create the claims at the beginning of the workflow
 	// and delete the claims upon completion of the workflow
-	// +patchStrategy=merge
-	// +patchMergeKey=name
-	VolumeClaimTemplates []apiv1.PersistentVolumeClaim `json:"volumeClaimTemplates,omitempty" patchStrategy:"merge" patchMergeKey:"name" protobuf:"bytes,6,opt,name=volumeClaimTemplates"`
+	VolumeClaimTemplates []apiv1.PersistentVolumeClaim `json:"volumeClaimTemplates,omitempty" protobuf:"bytes,6,opt,name=volumeClaimTemplates"`
 
 	// Parallelism limits the max total parallel pods that can execute at the same time in a workflow
 	Parallelism *int64 `json:"parallelism,omitempty" protobuf:"bytes,7,opt,name=parallelism"`
@@ -326,7 +326,7 @@ type WorkflowSpec struct {
 	// Host networking requested for this workflow pod. Default to false.
 	HostNetwork *bool `json:"hostNetwork,omitempty" protobuf:"bytes,14,opt,name=hostNetwork"`
 
-	// Set DNS policy for the pod.
+	// Set DNS policy for workflow pods.
 	// Defaults to "ClusterFirst".
 	// Valid values are 'ClusterFirstWithHostNet', 'ClusterFirst', 'Default' or 'None'.
 	// DNS parameters given in DNSConfig will be merged with the policy selected with DNSPolicy.
@@ -886,7 +886,7 @@ type ValueFrom struct {
 	// JQFilter expression against the resource object in resource templates
 	JQFilter string `json:"jqFilter,omitempty" protobuf:"bytes,3,opt,name=jqFilter"`
 
-	// Selector (https://github.com/antonmedv/expr) that is evaluated against the event to get the value of the parameter. E.g. `payload.message`
+	// Selector (https://github.com/expr-lang/expr) that is evaluated against the event to get the value of the parameter. E.g. `payload.message`
 	Event string `json:"event,omitempty" protobuf:"bytes,7,opt,name=event"`
 
 	// Parameter reference to a step or dag task in which to retrieve an output parameter value from
@@ -1155,7 +1155,7 @@ func (a *ArtifactLocation) Get() (ArtifactLocationType, error) {
 	} else if a.S3 != nil {
 		return a.S3, nil
 	}
-	return nil, fmt.Errorf("You need to configure artifact storage. More information on how to do this can be found in the docs: https://argoproj.github.io/argo-workflows/configure-artifact-repository/")
+	return nil, fmt.Errorf("You need to configure artifact storage. More information on how to do this can be found in the docs: https://argo-workflows.readthedocs.io/en/release-3.4/configure-artifact-repository/")
 }
 
 // SetType sets the type of the artifact to type the argument.
@@ -1704,6 +1704,64 @@ func (n Nodes) Find(f func(NodeStatus) bool) *NodeStatus {
 	return nil
 }
 
+// Get a NodeStatus from the hashmap of Nodes.
+// Return a nil along with an error if non existent.
+func (n Nodes) Get(key string) (*NodeStatus, error) {
+	val, ok := n[key]
+	if !ok {
+		return nil, fmt.Errorf("key was not found for %s", key)
+	}
+	return &val, nil
+}
+
+// Check if the Nodes map has a key entry
+func (n Nodes) Has(key string) bool {
+	_, err := n.Get(key)
+	return err == nil
+}
+
+// Get the Phase of a Node
+func (n Nodes) GetPhase(key string) (*NodePhase, error) {
+	val, err := n.Get(key)
+	if err != nil {
+		return nil, err
+	}
+	return &val.Phase, nil
+}
+
+// Set the status of a node by key
+func (n Nodes) Set(key string, status NodeStatus) {
+	if status.Name == "" {
+		log.Warnf("Name was not set for key %s", key)
+	}
+	if status.ID == "" {
+		log.Warnf("ID was not set for key %s", key)
+	}
+	_, ok := n[key]
+	if ok {
+		log.Tracef("Changing NodeStatus for %s to %+v", key, status)
+	}
+	n[key] = status
+}
+
+// Delete a node from the Nodes by key
+func (n Nodes) Delete(key string) {
+	has := n.Has(key)
+	if !has {
+		log.Warnf("Trying to delete non existent key %s", key)
+		return
+	}
+	delete(n, key)
+}
+
+// Get the name of a node by key
+func (n Nodes) GetName(key string) (string, error) {
+	val, err := n.Get(key)
+	if err != nil {
+		return "", err
+	}
+	return val.Name, nil
+}
 func NodeWithName(name string) func(n NodeStatus) bool {
 	return func(n NodeStatus) bool { return n.Name == name }
 }
@@ -2525,7 +2583,7 @@ func (a *AzureArtifact) SetKey(key string) error {
 }
 
 func (a *AzureArtifact) HasLocation() bool {
-	return a != nil && a.Container != "" && a.Blob != ""
+	return a != nil && a.Endpoint != "" && a.Container != "" && a.Blob != ""
 }
 
 // HDFSArtifact is the location of an HDFS artifact
@@ -2877,6 +2935,8 @@ func (tmpl *Template) GetNodeType() NodeType {
 		return NodeTypeSteps
 	case TemplateTypeSuspend:
 		return NodeTypeSuspend
+	case TemplateTypeHTTP:
+		return NodeTypeHTTP
 	case TemplateTypePlugin:
 		return NodeTypePlugin
 	}
@@ -3207,13 +3267,9 @@ func (wf *Workflow) GetTemplateByName(name string) *Template {
 	return nil
 }
 
-func (wf *Workflow) GetNodeByName(nodeName string) *NodeStatus {
+func (wf *Workflow) GetNodeByName(nodeName string) (*NodeStatus, error) {
 	nodeID := wf.NodeID(nodeName)
-	node, ok := wf.Status.Nodes[nodeID]
-	if !ok {
-		return nil
-	}
-	return &node
+	return wf.Status.Nodes.Get(nodeID)
 }
 
 // GetResourceScope returns the template scope of workflow.
@@ -3264,6 +3320,34 @@ func (wf *Workflow) SetStoredTemplate(scope ResourceScope, resourceName string, 
 		return true, nil
 	}
 	return false, nil
+}
+
+// SetStoredInlineTemplate stores a inline template in stored templates of the workflow.
+func (wf *Workflow) SetStoredInlineTemplate(scope ResourceScope, resourceName string, tmpl *Template) error {
+	// Store inline templates in steps.
+	for _, steps := range tmpl.Steps {
+		for _, step := range steps.Steps {
+			if step.GetTemplate() != nil {
+				_, err := wf.SetStoredTemplate(scope, resourceName, &step, step.GetTemplate())
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
+	// Store inline templates in DAG tasks.
+	if tmpl.DAG != nil {
+		for _, task := range tmpl.DAG.Tasks {
+			if task.GetTemplate() != nil {
+				_, err := wf.SetStoredTemplate(scope, resourceName, &task, task.GetTemplate())
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 // resolveTemplateReference resolves the stored template name of a given template holder on the template scope and determines

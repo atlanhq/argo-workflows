@@ -293,6 +293,10 @@ func TestUntar(t *testing.T) {
 	fileInfo, err = os.Stat(filePath)
 	assert.NoError(t, err)
 	assert.True(t, fileInfo.Mode().IsRegular())
+	dirInfo, err := os.Stat(destPath)
+	assert.NoError(t, err)
+	// check that the modification time of the file is retained
+	assert.True(t, fileInfo.ModTime().Before(dirInfo.ModTime()))
 	fileInfo, err = os.Stat(linkPath)
 	assert.NoError(t, err)
 	assert.True(t, fileInfo.Mode().IsRegular())
@@ -520,7 +524,7 @@ func TestMonitorProgress(t *testing.T) {
 }
 
 func TestSaveLogs(t *testing.T) {
-	const artStorageError = "You need to configure artifact storage. More information on how to do this can be found in the docs: https://argoproj.github.io/argo-workflows/configure-artifact-repository/"
+	const artStorageError = "You need to configure artifact storage. More information on how to do this can be found in the docs: https://argo-workflows.readthedocs.io/en/release-3.4/configure-artifact-repository/"
 	mockRuntimeExecutor := mocks.ContainerRuntimeExecutor{}
 	mockRuntimeExecutor.On("GetOutputStream", mock.Anything, mock.AnythingOfType("string"), true).Return(io.NopCloser(strings.NewReader("hello world")), nil)
 	t.Run("Simple Pod node", func(t *testing.T) {

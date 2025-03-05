@@ -593,7 +593,7 @@ message DataSource {
 }
 
 message Event {
-  // Selector (https://github.com/antonmedv/expr) that we must must match the event. E.g. `payload.message == "test"`
+  // Selector (https://github.com/expr-lang/expr) that we must must match the event. E.g. `payload.message == "test"`
   optional string selector = 1;
 }
 
@@ -1712,7 +1712,7 @@ message ValueFrom {
   // JQFilter expression against the resource object in resource templates
   optional string jqFilter = 3;
 
-  // Selector (https://github.com/antonmedv/expr) that is evaluated against the event to get the value of the parameter. E.g. `payload.message`
+  // Selector (https://github.com/expr-lang/expr) that is evaluated against the event to get the value of the parameter. E.g. `payload.message`
   optional string event = 7;
 
   // Parameter reference to a step or dag task in which to retrieve an output parameter value from
@@ -1870,8 +1870,6 @@ message WorkflowSpec {
   // VolumeClaimTemplates is a list of claims that containers are allowed to reference.
   // The Workflow controller will create the claims at the beginning of the workflow
   // and delete the claims upon completion of the workflow
-  // +patchStrategy=merge
-  // +patchMergeKey=name
   repeated k8s.io.api.core.v1.PersistentVolumeClaim volumeClaimTemplates = 6;
 
   // Parallelism limits the max total parallel pods that can execute at the same time in a workflow
@@ -1908,7 +1906,7 @@ message WorkflowSpec {
   // Host networking requested for this workflow pod. Default to false.
   optional bool hostNetwork = 14;
 
-  // Set DNS policy for the pod.
+  // Set DNS policy for workflow pods.
   // Defaults to "ClusterFirst".
   // Valid values are 'ClusterFirstWithHostNet', 'ClusterFirst', 'Default' or 'None'.
   // DNS parameters given in DNSConfig will be merged with the policy selected with DNSPolicy.

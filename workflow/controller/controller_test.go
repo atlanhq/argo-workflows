@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/resource"
+
 	"github.com/argoproj/pkg/sync"
 	"github.com/stretchr/testify/assert"
 	authorizationv1 "k8s.io/api/authorization/v1"
@@ -62,6 +64,35 @@ spec:
       args: ["hello world"]
 `
 
+var fromExrpessingWf = `
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: from-expression
+spec:
+  entrypoint: main
+  arguments:
+    artifacts:
+    - name: foo
+      raw:
+        data: |
+          Hello
+  templates:
+    - name: main
+      inputs:
+        artifacts:
+        - name: foo
+      steps:
+      - - name: hello
+          inline:
+            container:
+              image: docker/whalesay:latest
+      outputs:
+        artifacts:
+        - name: result
+          fromExpression: "1 == 1 ? inputs.artifacts.foo : inputs.artifacts.foo"
+`
+
 var helloDaemonWf = `
 apiVersion: argoproj.io/v1alpha1
 kind: Workflow
@@ -93,6 +124,41 @@ metadata:
   labels:
     foo: bar
 spec:
+  entrypoint: whalesay
+  serviceAccountName: whalesay
+  templates:
+  - name: whalesay
+    metadata:
+      annotations:
+        annotationKey1: "annotationValue1"
+        annotationKey2: "annotationValue2"
+      labels:
+        labelKey1: "labelValue1"
+        labelKey2: "labelValue2"
+    container:
+      image: docker/whalesay:latest
+      command: [cowsay]
+      args: ["hello world"]
+`
+
+var testDefaultVolumeClaimTemplateWf = `
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  name: hello-world
+  labels:
+    foo: bar
+spec:
+  volumeClaimTemplates:
+  - metadata:
+      name: workdir
+    spec:
+      accessModes:
+      - ReadWriteOnce
+      resources:
+        requests:
+          storage: 1Mi
+      storageClassName: local-path
   entrypoint: whalesay
   serviceAccountName: whalesay
   templates:
@@ -221,7 +287,7 @@ func newController(options ...interface{}) (context.CancelFunc, *WorkflowControl
 
 	// always compare to WorkflowController.Run to see what this block of code should be doing
 	{
-		wfc.wfInformer = util.NewWorkflowInformer(dynamicClient, "", 0, wfc.tweakListOptions, indexers)
+		wfc.wfInformer = util.NewWorkflowInformer(dynamicClient, "", 0, wfc.tweakListRequestListOptions, wfc.tweakWatchRequestListOptions, indexers)
 		wfc.wfTaskSetInformer = informerFactory.Argoproj().V1alpha1().WorkflowTaskSets()
 		wfc.artGCTaskInformer = informerFactory.Argoproj().V1alpha1().WorkflowArtifactGCTasks()
 		wfc.taskResultInformer = wfc.newWorkflowTaskResultInformer()
@@ -288,6 +354,30 @@ func newControllerWithComplexDefaults() (context.CancelFunc, *WorkflowController
 					SecondsAfterSuccess:    pointer.Int32Ptr(10),
 					SecondsAfterFailure:    pointer.Int32Ptr(10),
 				},
+			},
+		}
+	})
+	return cancel, controller
+}
+
+func newControllerWithDefaultsVolumeClaimTemplate() (context.CancelFunc, *WorkflowController) {
+	cancel, controller := newController(func(controller *WorkflowController) {
+		controller.Config.WorkflowDefaults = &wfv1.Workflow{
+			Spec: wfv1.WorkflowSpec{
+				VolumeClaimTemplates: []apiv1.PersistentVolumeClaim{{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "workdir",
+					},
+					Spec: apiv1.PersistentVolumeClaimSpec{
+						AccessModes: []apiv1.PersistentVolumeAccessMode{apiv1.ReadWriteOnce},
+						Resources: apiv1.ResourceRequirements{
+							Requests: apiv1.ResourceList{
+								apiv1.ResourceStorage: resource.MustParse("1Mi"),
+							},
+						},
+						StorageClassName: pointer.String("local-path"),
+					},
+				}},
 			},
 		}
 	})
@@ -496,6 +586,15 @@ func TestAddingWorkflowDefaultComplexTwo(t *testing.T) {
 	assert.Contains(t, workflow.Annotations, "annotation")
 }
 
+func TestAddingWorkflowDefaultVolumeClaimTemplate(t *testing.T) {
+	cancel, controller := newControllerWithDefaultsVolumeClaimTemplate()
+	defer cancel()
+	workflow := wfv1.MustUnmarshalWorkflow(testDefaultWf)
+	err := controller.setWorkflowDefaults(workflow)
+	assert.NoError(t, err)
+	assert.Equal(t, workflow, wfv1.MustUnmarshalWorkflow(testDefaultVolumeClaimTemplateWf))
+}
+
 func TestNamespacedController(t *testing.T) {
 	kubeClient := fake.Clientset{}
 	allowed := false
@@ -561,10 +660,22 @@ spec:
       container:
         image: my-image
 `),
+				wfv1.MustUnmarshalWorkflow(`
+metadata:
+  name: my-wf-2
+spec:
+  shutdown: Terminate
+  entrypoint: main
+  templates:
+    - name: main
+      container:
+        image: my-image
+`),
 				f,
 			)
 			defer cancel()
 			ctx := context.Background()
+			assert.True(t, controller.processNextItem(ctx))
 			assert.True(t, controller.processNextItem(ctx))
 			assert.True(t, controller.processNextItem(ctx))
 
@@ -577,6 +688,11 @@ spec:
 				if assert.NotNil(t, wf) {
 					assert.Equal(t, wfv1.WorkflowPending, wf.Status.Phase)
 					assert.Equal(t, "Workflow processing has been postponed because too many workflows are already running", wf.Status.Message)
+				}
+			})
+			expectWorkflow(ctx, controller, "my-wf-2", func(wf *wfv1.Workflow) {
+				if assert.NotNil(t, wf) {
+					assert.Equal(t, wfv1.WorkflowFailed, wf.Status.Phase)
 				}
 			})
 		})
@@ -997,4 +1113,76 @@ spec:
 	assert.Equal(t, wfv1.WorkflowSucceeded, woc.wf.Status.Phase)
 	podCleanupKey := "test/my-wf/labelPodCompleted"
 	assert.Equal(t, 0, controller.podCleanupQueue.NumRequeues(podCleanupKey))
+}
+
+func TestPodCleanupDeletePendingPodWhenTerminate(t *testing.T) {
+	wf := wfv1.MustUnmarshalWorkflow(`
+metadata:
+  name: my-wf
+  namespace: test
+spec:
+  entrypoint: main
+  templates:
+    - name: main
+      container:
+        image: my-image
+  `)
+	cancel, controller := newController(wf)
+	defer cancel()
+
+	ctx := context.Background()
+	assert.True(t, controller.processNextItem(ctx))
+
+	woc := newWorkflowOperationCtx(wf, controller)
+	woc.operate(ctx)
+	assert.Equal(t, wfv1.WorkflowRunning, woc.wf.Status.Phase)
+	makePodsPhase(ctx, woc, apiv1.PodPending)
+	woc.execWf.Spec.Shutdown = wfv1.ShutdownStrategyTerminate
+	woc.operate(ctx)
+	assert.True(t, controller.processNextPodCleanupItem(ctx))
+	assert.True(t, controller.processNextPodCleanupItem(ctx))
+	assert.True(t, controller.processNextPodCleanupItem(ctx))
+	assert.True(t, controller.processNextPodCleanupItem(ctx))
+	assert.Equal(t, wfv1.WorkflowFailed, woc.wf.Status.Phase)
+	pods, err := listPods(woc)
+	assert.NoError(t, err)
+	assert.Len(t, pods.Items, 0)
+}
+
+func TestPendingPodWhenTerminate(t *testing.T) {
+	wf := wfv1.MustUnmarshalWorkflow(helloWorldWf)
+	wf.Spec.Shutdown = wfv1.ShutdownStrategyTerminate
+	wf.Status.Phase = wfv1.WorkflowPending
+
+	cancel, controller := newController(wf)
+	defer cancel()
+
+	ctx := context.Background()
+	assert.True(t, controller.processNextItem(ctx))
+
+	woc := newWorkflowOperationCtx(wf, controller)
+	woc.operate(ctx)
+	assert.Equal(t, wfv1.WorkflowFailed, woc.wf.Status.Phase)
+	for _, node := range woc.wf.Status.Nodes {
+		assert.Equal(t, wfv1.NodeFailed, node.Phase)
+	}
+}
+
+func TestWorkflowReferItselfFromExpression(t *testing.T) {
+	wf := wfv1.MustUnmarshalWorkflow(fromExrpessingWf)
+	cancel, controller := newController(wf)
+	defer cancel()
+
+	ctx := context.Background()
+	assert.True(t, controller.processNextItem(ctx))
+
+	woc := newWorkflowOperationCtx(wf, controller)
+	woc.operate(ctx)
+	assert.Equal(t, wfv1.WorkflowRunning, woc.wf.Status.Phase)
+	makePodsPhase(ctx, woc, apiv1.PodSucceeded)
+
+	woc.operate(ctx)
+	assert.True(t, controller.processNextPodCleanupItem(ctx))
+	assert.True(t, controller.processNextPodCleanupItem(ctx))
+	assert.Equal(t, wfv1.WorkflowSucceeded, woc.wf.Status.Phase)
 }

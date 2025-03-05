@@ -96,7 +96,7 @@ func (woc *wfOperationCtx) createWorkflowPod(ctx context.Context, nodeName strin
 
 	if !woc.GetShutdownStrategy().ShouldExecute(opts.onExitPod) {
 		// Do not create pods if we are shutting down
-		woc.markNodePhase(nodeName, wfv1.NodeSkipped, fmt.Sprintf("workflow shutdown with strategy: %s", woc.GetShutdownStrategy()))
+		woc.markNodePhase(nodeName, wfv1.NodeFailed, fmt.Sprintf("workflow shutdown with strategy: %s", woc.GetShutdownStrategy()))
 		return nil, nil
 	}
 
@@ -190,13 +190,7 @@ func (woc *wfOperationCtx) createWorkflowPod(ctx context.Context, nodeName strin
 		pod.Spec.HostNetwork = *woc.execWf.Spec.HostNetwork
 	}
 
-	if woc.execWf.Spec.DNSPolicy != nil {
-		pod.Spec.DNSPolicy = *woc.execWf.Spec.DNSPolicy
-	}
-
-	if woc.execWf.Spec.DNSConfig != nil {
-		pod.Spec.DNSConfig = woc.execWf.Spec.DNSConfig
-	}
+	woc.addDNSConfig(pod)
 
 	if woc.controller.Config.InstanceID != "" {
 		pod.ObjectMeta.Labels[common.LabelKeyControllerInstanceID] = woc.controller.Config.InstanceID
@@ -366,7 +360,7 @@ func (woc *wfOperationCtx) createWorkflowPod(ctx context.Context, nodeName strin
 		if tmpl.IsPodType() {
 			localParams[common.LocalVarPodName] = pod.Name
 		}
-		tmpl, err := common.ProcessArgs(tmpl, &wfv1.Arguments{}, woc.globalParams, localParams, false, woc.wf.Namespace, woc.controller.configMapInformer)
+		tmpl, err := common.ProcessArgs(tmpl, &wfv1.Arguments{}, woc.globalParams, localParams, false, woc.wf.Namespace, woc.controller.configMapInformer.GetIndexer())
 		if err != nil {
 			return nil, errors.Wrap(err, "", "Failed to substitute the PodSpecPatch variables")
 		}
@@ -394,7 +388,7 @@ func (woc *wfOperationCtx) createWorkflowPod(ctx context.Context, nodeName strin
 					Namespace: woc.wf.Namespace, ServiceAccountName: woc.execWf.Spec.ServiceAccountName, ImagePullSecrets: woc.execWf.Spec.ImagePullSecrets,
 				})
 				if err != nil {
-					return nil, fmt.Errorf("failed to look-up entrypoint/cmd for image %q, you must either explicitly specify the command, or list the image's command in the index: https://argoproj.github.io/argo-workflows/workflow-executors/#emissary-emissary: %w", c.Image, err)
+					return nil, fmt.Errorf("failed to look-up entrypoint/cmd for image %q, you must either explicitly specify the command, or list the image's command in the index: https://argo-workflows.readthedocs.io/en/release-3.4/workflow-executors/#emissary-emissary: %w", c.Image, err)
 				}
 				c.Command = x.Entrypoint
 				if c.Args == nil { // check nil rather than length, as zero-length is valid args
@@ -421,7 +415,10 @@ func (woc *wfOperationCtx) createWorkflowPod(ctx context.Context, nodeName strin
 	}
 
 	// Check if the template has exceeded its timeout duration. If it hasn't set the applicable activeDeadlineSeconds
-	node := woc.wf.GetNodeByName(nodeName)
+	node, err := woc.wf.GetNodeByName(nodeName)
+	if err != nil {
+		woc.log.Warnf("couldn't retrieve node for nodeName %s, will get nil templateDeadline", nodeName)
+	}
 	templateDeadline, err := woc.checkTemplateTimeout(tmpl, node)
 	if err != nil {
 		return nil, err
@@ -612,6 +609,7 @@ func (woc *wfOperationCtx) newExecContainer(name string, tmpl *wfv1.Template) *a
 		Env:             woc.createEnvVars(),
 		Resources:       woc.controller.Config.GetExecutor().Resources,
 		SecurityContext: woc.controller.Config.GetExecutor().SecurityContext,
+		Args:            woc.controller.Config.GetExecutor().Args,
 	}
 	// lock down resource pods by default
 	if tmpl.GetType() == wfv1.TemplateTypeResource && exec.SecurityContext == nil {
@@ -678,6 +676,17 @@ func (woc *wfOperationCtx) addMetadata(pod *apiv1.Pod, tmpl *wfv1.Template) {
 	}
 	for k, v := range tmpl.Metadata.Labels {
 		pod.ObjectMeta.Labels[k] = v
+	}
+}
+
+// addDNSConfig applies DNSConfig to the pod
+func (woc *wfOperationCtx) addDNSConfig(pod *apiv1.Pod) {
+	if woc.execWf.Spec.DNSPolicy != nil {
+		pod.Spec.DNSPolicy = *woc.execWf.Spec.DNSPolicy
+	}
+
+	if woc.execWf.Spec.DNSConfig != nil {
+		pod.Spec.DNSConfig = woc.execWf.Spec.DNSConfig
 	}
 }
 

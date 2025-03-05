@@ -154,6 +154,7 @@ instantiators
 jenkins
 k3d
 k3s
+k8s
 k8s-jobs
 kube
 kubelet
@@ -216,6 +217,7 @@ v3.3
 v3.3.
 v3.4
 v3.4.
+v3.4.4
 validator
 versioning
 webHDFS
