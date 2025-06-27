@@ -76,6 +76,19 @@ func matchTransientErrPattern(err error) bool {
 	return match
 }
 
+func IsAlwaysRetryErr(err error) bool {
+	pattern, _ := os.LookupEnv("ALWAYS_RETRY_ERROR_PATTERN")
+	if pattern == "" {
+		return false
+	}
+	err = argoerrs.Cause(err)
+	isAlwaysRetry, _ := regexp.MatchString(pattern, generateErrorString(err))
+	if isAlwaysRetry {
+		log.Infof("AlwaysRetry error: %v", err)
+	}
+	return isAlwaysRetry
+}
+
 func isExceededQuotaErr(err error) bool {
 	return apierr.IsForbidden(err) && strings.Contains(err.Error(), "exceeded quota")
 }

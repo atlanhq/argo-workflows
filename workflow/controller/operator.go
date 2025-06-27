@@ -1083,7 +1083,7 @@ func (woc *wfOperationCtx) processNodeRetries(node *wfv1.NodeStatus, retryStrate
 		}
 
 		// See if we have waited past the deadline
-		if time.Now().Before(waitingDeadline) && retryStrategy.Limit != nil && int32(len(childNodeIds)) <= int32(retryStrategy.Limit.IntValue()) {
+		if time.Now().Before(waitingDeadline) && retryStrategy.Limit != nil && (errorsutil.IsAlwaysRetryErr(errors.InternalError(lastChildNode.Message)) || int32(len(childNodeIds)) <= int32(retryStrategy.Limit.IntValue())) {
 			woc.requeueAfter(timeToWait)
 			retryMessage := fmt.Sprintf("Backoff for %s", humanize.Duration(timeToWait))
 			return woc.markNodePhase(node.Name, node.Phase, retryMessage), false, nil
@@ -1131,9 +1131,11 @@ func (woc *wfOperationCtx) processNodeRetries(node *wfv1.NodeStatus, retryStrate
 	if err != nil {
 		return nil, false, err
 	}
-	if retryStrategy.Limit != nil && limit != nil && int32(len(childNodeIds)) > *limit {
-		woc.log.Infoln("No more retries left. Failing...")
-		return woc.markNodePhase(node.Name, lastChildNode.Phase, "No more retries left"), true, nil
+	if !errorsutil.IsAlwaysRetryErr(errors.InternalError(lastChildNode.Message)) {
+		if retryStrategy.Limit != nil && limit != nil && int32(len(childNodeIds)) > *limit {
+			woc.log.Infoln("No more retries left. Failing...")
+			return woc.markNodePhase(node.Name, lastChildNode.Phase, "No more retries left"), true, nil
+		}
 	}
 
 	if retryStrategy.Expression != "" && len(childNodeIds) > 0 {
