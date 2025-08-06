@@ -291,11 +291,11 @@ func newController(options ...interface{}) (context.CancelFunc, *WorkflowControl
 		wfc.wfInformer = util.NewWorkflowInformer(dynamicClient, "", 0, wfc.tweakListRequestListOptions, wfc.tweakWatchRequestListOptions, indexers)
 		wfc.wfTaskSetInformer = informerFactory.Argoproj().V1alpha1().WorkflowTaskSets()
 		wfc.artGCTaskInformer = informerFactory.Argoproj().V1alpha1().WorkflowArtifactGCTasks()
-		wfc.taskResultInformer = wfc.newWorkflowTaskResultInformer()
+		wfc.taskResultInformer, _ = wfc.newWorkflowTaskResultInformer()
 		wfc.wftmplInformer = informerFactory.Argoproj().V1alpha1().WorkflowTemplates()
-		wfc.addWorkflowInformerHandlers(ctx)
-		wfc.podInformer = wfc.newPodInformer(ctx)
-		wfc.configMapInformer = wfc.newConfigMapInformer()
+		_ = wfc.addWorkflowInformerHandlers(ctx)
+		wfc.podInformer, _ = wfc.newPodInformer(ctx)
+		wfc.configMapInformer, _ = wfc.newConfigMapInformer()
 		wfc.createSynchronizationManager(ctx)
 		_ = wfc.initManagers(ctx)
 
@@ -329,7 +329,7 @@ func newController(options ...interface{}) (context.CancelFunc, *WorkflowControl
 func newControllerWithDefaults() (context.CancelFunc, *WorkflowController) {
 	cancel, controller := newController(func(controller *WorkflowController) {
 		controller.Config.WorkflowDefaults = &wfv1.Workflow{
-			Spec: wfv1.WorkflowSpec{HostNetwork: pointer.BoolPtr(true)},
+			Spec: wfv1.WorkflowSpec{HostNetwork: pointer.Bool(true)},
 		}
 	})
 	return cancel, controller
@@ -347,13 +347,13 @@ func newControllerWithComplexDefaults() (context.CancelFunc, *WorkflowController
 				},
 			},
 			Spec: wfv1.WorkflowSpec{
-				HostNetwork:        pointer.BoolPtr(true),
+				HostNetwork:        pointer.Bool(true),
 				Entrypoint:         "good_entrypoint",
 				ServiceAccountName: "my_service_account",
 				TTLStrategy: &wfv1.TTLStrategy{
-					SecondsAfterCompletion: pointer.Int32Ptr(10),
-					SecondsAfterSuccess:    pointer.Int32Ptr(10),
-					SecondsAfterFailure:    pointer.Int32Ptr(10),
+					SecondsAfterCompletion: pointer.Int32(10),
+					SecondsAfterSuccess:    pointer.Int32(10),
+					SecondsAfterFailure:    pointer.Int32(10),
 				},
 			},
 		}
@@ -361,8 +361,8 @@ func newControllerWithComplexDefaults() (context.CancelFunc, *WorkflowController
 	return cancel, controller
 }
 
-func newControllerWithDefaultsVolumeClaimTemplate() (context.CancelFunc, *WorkflowController) {
-	cancel, controller := newController(func(controller *WorkflowController) {
+func newControllerWithDefaultsVolumeClaimTemplate(ctx context.Context) (context.CancelFunc, *WorkflowController) {
+	cancel, controller := newController(ctx, func(controller *WorkflowController) {
 		controller.Config.WorkflowDefaults = &wfv1.Workflow{
 			Spec: wfv1.WorkflowSpec{
 				VolumeClaimTemplates: []apiv1.PersistentVolumeClaim{{
@@ -371,7 +371,7 @@ func newControllerWithDefaultsVolumeClaimTemplate() (context.CancelFunc, *Workfl
 					},
 					Spec: apiv1.PersistentVolumeClaimSpec{
 						AccessModes: []apiv1.PersistentVolumeAccessMode{apiv1.ReadWriteOnce},
-						Resources: apiv1.ResourceRequirements{
+						Resources: apiv1.VolumeResourceRequirements{
 							Requests: apiv1.ResourceList{
 								apiv1.ResourceStorage: resource.MustParse("1Mi"),
 							},
@@ -550,7 +550,7 @@ func TestAddingWorkflowDefaultValueIfValueNotExist(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, defaultWorkflowSpec.Spec.HostNetwork, &ans)
 		assert.NotEqual(t, defaultWorkflowSpec, wfv1.MustUnmarshalWorkflow(helloWorldWf))
-		assert.Equal(t, *defaultWorkflowSpec.Spec.HostNetwork, true)
+		assert.True(t, *defaultWorkflowSpec.Spec.HostNetwork)
 	})
 }
 
@@ -559,14 +559,14 @@ func TestAddingWorkflowDefaultComplex(t *testing.T) {
 	defer cancel()
 	workflow := wfv1.MustUnmarshalWorkflow(testDefaultWf)
 	var ten int32 = 10
-	assert.Equal(t, workflow.Spec.Entrypoint, "whalesay")
+	assert.Equal(t, "whalesay", workflow.Spec.Entrypoint)
 	assert.Nil(t, workflow.Spec.TTLStrategy)
 	assert.Contains(t, workflow.Labels, "foo")
 	err := controller.setWorkflowDefaults(workflow)
 	assert.NoError(t, err)
 	assert.NotEqual(t, workflow, wfv1.MustUnmarshalWorkflow(testDefaultWf))
-	assert.Equal(t, workflow.Spec.Entrypoint, "whalesay")
-	assert.Equal(t, workflow.Spec.ServiceAccountName, "whalesay")
+	assert.Equal(t, "whalesay", workflow.Spec.Entrypoint)
+	assert.Equal(t, "whalesay", workflow.Spec.ServiceAccountName)
 	assert.Equal(t, *workflow.Spec.TTLStrategy.SecondsAfterFailure, ten)
 	assert.Contains(t, workflow.Labels, "foo")
 	assert.Contains(t, workflow.Labels, "label")
@@ -582,8 +582,8 @@ func TestAddingWorkflowDefaultComplexTwo(t *testing.T) {
 	err := controller.setWorkflowDefaults(workflow)
 	assert.NoError(t, err)
 	assert.NotEqual(t, workflow, wfv1.MustUnmarshalWorkflow(testDefaultWfTTL))
-	assert.Equal(t, workflow.Spec.Entrypoint, "whalesay")
-	assert.Equal(t, workflow.Spec.ServiceAccountName, "whalesay")
+	assert.Equal(t, "whalesay", workflow.Spec.Entrypoint)
+	assert.Equal(t, "whalesay", workflow.Spec.ServiceAccountName)
 	assert.Equal(t, *workflow.Spec.TTLStrategy.SecondsAfterCompletion, five)
 	assert.Equal(t, *workflow.Spec.TTLStrategy.SecondsAfterFailure, ten)
 	assert.NotContains(t, workflow.Labels, "foo")
@@ -592,7 +592,7 @@ func TestAddingWorkflowDefaultComplexTwo(t *testing.T) {
 }
 
 func TestAddingWorkflowDefaultVolumeClaimTemplate(t *testing.T) {
-	cancel, controller := newControllerWithDefaultsVolumeClaimTemplate()
+	cancel, controller := newControllerWithDefaultsVolumeClaimTemplate(context.Background())
 	defer cancel()
 	workflow := wfv1.MustUnmarshalWorkflow(testDefaultWf)
 	err := controller.setWorkflowDefaults(workflow)
@@ -808,7 +808,7 @@ func TestInvalidWorkflowMetadata(t *testing.T) {
 	defer cancel()
 	woc := newWorkflowOperationCtx(wf, controller)
 	err := woc.setExecWorkflow(context.Background())
-	if assert.NotNil(t, err) {
+	if assert.Error(t, err) {
 		assert.Contains(t, err.Error(), "invalid label value")
 	}
 
@@ -817,7 +817,7 @@ func TestInvalidWorkflowMetadata(t *testing.T) {
 	defer cancel()
 	woc = newWorkflowOperationCtx(wf, controller)
 	err = woc.setExecWorkflow(context.Background())
-	if assert.NotNil(t, err) {
+	if assert.Error(t, err) {
 		assert.Contains(t, err.Error(), "invalid label value")
 	}
 }
@@ -1150,7 +1150,7 @@ spec:
 	assert.Equal(t, wfv1.WorkflowFailed, woc.wf.Status.Phase)
 	pods, err := listPods(woc)
 	assert.NoError(t, err)
-	assert.Len(t, pods.Items, 0)
+	assert.Empty(t, pods.Items)
 }
 
 func TestPendingPodWhenTerminate(t *testing.T) {

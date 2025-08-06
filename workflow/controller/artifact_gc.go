@@ -448,7 +448,7 @@ func (woc *wfOperationCtx) createArtifactGCPod(ctx context.Context, strategy wfv
 						Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
 						Privileged:               pointer.Bool(false),
 						RunAsNonRoot:             pointer.Bool(true),
-						RunAsUser:                pointer.Int64Ptr(8737),
+						RunAsUser:                pointer.Int64(8737),
 						ReadOnlyRootFilesystem:   pointer.Bool(true),
 						AllowPrivilegeEscalation: pointer.Bool(false),
 					},
@@ -484,10 +484,10 @@ func (woc *wfOperationCtx) createArtifactGCPod(ctx context.Context, strategy wfv
 		pod.Spec.ServiceAccountName = podInfo.serviceAccount
 	}
 	for label, labelVal := range podInfo.podMetadata.Labels {
-		pod.ObjectMeta.Labels[label] = labelVal
+		pod.Labels[label] = labelVal
 	}
 	for annotation, annotationVal := range podInfo.podMetadata.Annotations {
-		pod.ObjectMeta.Annotations[annotation] = annotationVal
+		pod.Annotations[annotation] = annotationVal
 	}
 
 	if v := woc.controller.Config.InstanceID; v != "" {

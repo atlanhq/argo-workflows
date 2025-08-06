@@ -122,7 +122,7 @@ func TestMutexLock(t *testing.T) {
 		wfList, err := wfclientset.ArgoprojV1alpha1().Workflows("default").List(ctx, metav1.ListOptions{})
 		assert.NoError(t, err)
 		concurrenyMgr.Initialize(wfList.Items)
-		assert.Equal(t, 1, len(concurrenyMgr.syncLockMap))
+		assert.Len(t, concurrenyMgr.syncLockMap, 1)
 	})
 	t.Run("WfLevelMutexAcquireAndRelease", func(t *testing.T) {
 		var nextWorkflow string
@@ -158,7 +158,7 @@ func TestMutexLock(t *testing.T) {
 		assert.True(t, wfUpdate)
 
 		wf2.Name = "three"
-		wf2.Spec.Priority = pointer.Int32Ptr(5)
+		wf2.Spec.Priority = pointer.Int32(5)
 		holderKey2 := getHolderKey(wf2, "")
 		status, wfUpdate, msg, err = concurrenyMgr.TryAcquire(wf2, "", wf2.Spec.Synchronization)
 		assert.NoError(t, err)
@@ -176,7 +176,7 @@ func TestMutexLock(t *testing.T) {
 		concurrenyMgr.Release(wf, "", wf.Spec.Synchronization)
 		assert.Equal(t, holderKey2, nextWorkflow)
 		assert.NotNil(t, wf.Status.Synchronization)
-		assert.Equal(t, 0, len(wf.Status.Synchronization.Mutex.Holding))
+		assert.Empty(t, wf.Status.Synchronization.Mutex.Holding)
 
 		// Low priority workflow try to acquire the lock
 		status, wfUpdate, msg, err = concurrenyMgr.TryAcquire(wf1, "", wf1.Spec.Synchronization)
@@ -235,7 +235,7 @@ func TestMutexLock(t *testing.T) {
 
 		wf2.Name = "three"
 		wf2.Namespace = "three"
-		wf2.Spec.Priority = pointer.Int32Ptr(5)
+		wf2.Spec.Priority = pointer.Int32(5)
 		holderKey2 := getHolderKey(wf2, "")
 		status, wfUpdate, msg, err = concurrenyMgr.TryAcquire(wf2, "", wf2.Spec.Synchronization)
 		assert.NoError(t, err)
@@ -254,7 +254,7 @@ func TestMutexLock(t *testing.T) {
 		concurrenyMgr.Release(wf, "", wf.Spec.Synchronization)
 		assert.Equal(t, holderKey2, nextWorkflow)
 		assert.NotNil(t, wf.Status.Synchronization)
-		assert.Equal(t, 0, len(wf.Status.Synchronization.Mutex.Holding))
+		assert.Empty(t, wf.Status.Synchronization.Mutex.Holding)
 
 		// Low priority workflow try to acquire the lock
 		status, wfUpdate, msg, err = concurrenyMgr.TryAcquire(wf1, "", wf1.Spec.Synchronization)

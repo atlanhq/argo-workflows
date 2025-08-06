@@ -68,7 +68,7 @@ func assessAgentPodStatus(pod *apiv1.Pod) (wfv1.NodePhase, string) {
 		message = pod.Status.Message
 	default:
 		newPhase = wfv1.NodeError
-		message = fmt.Sprintf("Unexpected pod phase for %s: %s", pod.ObjectMeta.Name, pod.Status.Phase)
+		message = fmt.Sprintf("Unexpected pod phase for %s: %s", pod.Name, pod.Status.Phase)
 	}
 	return newPhase, message
 }
@@ -179,10 +179,10 @@ func (woc *wfOperationCtx) createAgentPod(ctx context.Context) (*apiv1.Pod, erro
 			Capabilities: &apiv1.Capabilities{
 				Drop: []apiv1.Capability{"ALL"},
 			},
-			RunAsNonRoot:             pointer.BoolPtr(true),
-			RunAsUser:                pointer.Int64Ptr(8737),
-			ReadOnlyRootFilesystem:   pointer.BoolPtr(true),
-			AllowPrivilegeEscalation: pointer.BoolPtr(false),
+			RunAsNonRoot:             pointer.Bool(true),
+			RunAsUser:                pointer.Int64(8737),
+			ReadOnlyRootFilesystem:   pointer.Bool(true),
+			AllowPrivilegeEscalation: pointer.Bool(false),
 		},
 		Resources: apiv1.ResourceRequirements{
 			Requests: map[apiv1.ResourceName]resource.Quantity{
@@ -208,7 +208,7 @@ func (woc *wfOperationCtx) createAgentPod(ctx context.Context) (*apiv1.Pod, erro
 	pod := &apiv1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      podName,
-			Namespace: woc.wf.ObjectMeta.Namespace,
+			Namespace: woc.wf.Namespace,
 			Labels: map[string]string{
 				common.LabelKeyWorkflow:  woc.wf.Name, // Allows filtering by pods related to specific workflow
 				common.LabelKeyCompleted: "false",     // Allows filtering by incomplete workflow pods
@@ -225,11 +225,11 @@ func (woc *wfOperationCtx) createAgentPod(ctx context.Context) (*apiv1.Pod, erro
 			RestartPolicy:    apiv1.RestartPolicyOnFailure,
 			ImagePullSecrets: woc.execWf.Spec.ImagePullSecrets,
 			SecurityContext: &apiv1.PodSecurityContext{
-				RunAsNonRoot: pointer.BoolPtr(true),
-				RunAsUser:    pointer.Int64Ptr(8737),
+				RunAsNonRoot: pointer.Bool(true),
+				RunAsUser:    pointer.Int64(8737),
 			},
 			ServiceAccountName:           serviceAccountName,
-			AutomountServiceAccountToken: pointer.BoolPtr(false),
+			AutomountServiceAccountToken: pointer.Bool(false),
 			Volumes:                      podVolumes,
 			InitContainers: []apiv1.Container{
 				*agentInitCtr,
@@ -255,7 +255,7 @@ func (woc *wfOperationCtx) createAgentPod(ctx context.Context) (*apiv1.Pod, erro
 	}
 
 	if woc.controller.Config.InstanceID != "" {
-		pod.ObjectMeta.Labels[common.LabelKeyControllerInstanceID] = woc.controller.Config.InstanceID
+		pod.Labels[common.LabelKeyControllerInstanceID] = woc.controller.Config.InstanceID
 	}
 
 	log.Debug("Creating Agent pod")

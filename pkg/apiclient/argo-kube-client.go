@@ -4,8 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	eventsource "github.com/argoproj/argo-events/pkg/client/eventsource/clientset/versioned"
-	sensor "github.com/argoproj/argo-events/pkg/client/sensor/clientset/versioned"
+	events "github.com/argoproj/argo-events/pkg/client/clientset/versioned"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
@@ -34,7 +33,7 @@ import (
 
 var (
 	argoKubeOffloadNodeStatusRepo = sqldb.ExplosiveOffloadNodeStatusRepo
-	NoArgoServerErr               = fmt.Errorf("this is impossible if you are not using the Argo Server, see " + help.CLI())
+	NoArgoServerErr               = fmt.Errorf("%s", "this is impossible if you are not using the Argo Server, see "+help.CLI())
 )
 
 type argoKubeClient struct {
@@ -59,11 +58,7 @@ func newArgoKubeClient(ctx context.Context, clientConfig clientcmd.ClientConfig,
 	if err != nil {
 		return nil, nil, err
 	}
-	eventSourceInterface, err := eventsource.NewForConfig(restConfig)
-	if err != nil {
-		return nil, nil, err
-	}
-	sensorInterface, err := sensor.NewForConfig(restConfig)
+	eventInterface, err := events.NewForConfig(restConfig)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -72,11 +67,10 @@ func newArgoKubeClient(ctx context.Context, clientConfig clientcmd.ClientConfig,
 		return nil, nil, err
 	}
 	clients := &types.Clients{
-		Dynamic:     dynamicClient,
-		EventSource: eventSourceInterface,
-		Kubernetes:  kubeClient,
-		Sensor:      sensorInterface,
-		Workflow:    wfClient,
+		Dynamic:    dynamicClient,
+		Events:     eventInterface,
+		Kubernetes: kubeClient,
+		Workflow:   wfClient,
 	}
 	gatekeeper, err := auth.NewGatekeeper(auth.Modes{auth.Server: true}, clients, restConfig, nil, auth.DefaultClientForAuthorization, "unused", "unused", false, nil)
 	if err != nil {

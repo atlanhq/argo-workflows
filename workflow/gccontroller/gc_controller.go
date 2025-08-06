@@ -57,7 +57,7 @@ func NewController(wfClientset wfclientset.Interface, wfInformer cache.SharedInd
 		retentionPolicy: retentionPolicy,
 	}
 
-	wfInformer.AddEventHandler(cache.FilteringResourceEventHandler{
+	_, err := wfInformer.AddEventHandler(cache.FilteringResourceEventHandler{
 		FilterFunc: func(obj interface{}) bool {
 			un, ok := obj.(*unstructured.Unstructured)
 			return ok && common.IsDone(un)
@@ -69,8 +69,11 @@ func NewController(wfClientset wfclientset.Interface, wfInformer cache.SharedInd
 			},
 		},
 	})
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	wfInformer.AddEventHandler(cache.FilteringResourceEventHandler{
+	_, err = wfInformer.AddEventHandler(cache.FilteringResourceEventHandler{
 		FilterFunc: func(obj interface{}) bool {
 			un, ok := obj.(*unstructured.Unstructured)
 			return ok && common.IsDone(un)
@@ -84,6 +87,9 @@ func NewController(wfClientset wfclientset.Interface, wfInformer cache.SharedInd
 			},
 		},
 	})
+	if err != nil {
+		log.Fatal(err)
+	}
 	return controller
 }
 
@@ -138,7 +144,7 @@ func (c *Controller) runWorker() {
 
 // retentionGC queues workflows for deletion based upon the retention policy.
 func (c *Controller) runGC(phase wfv1.WorkflowPhase) {
-	defer runtimeutil.HandleCrash(runtimeutil.PanicHandlers...)
+	defer runtimeutil.HandleCrashWithContext(context.Background(), runtimeutil.PanicHandlers...)
 	var maxWorkflows int
 	switch phase {
 	case wfv1.WorkflowSucceeded:

@@ -74,7 +74,7 @@ type response struct {
 }
 
 func (ae *AgentExecutor) Agent(ctx context.Context) error {
-	defer runtimeutil.HandleCrash(runtimeutil.PanicHandlers...)
+	defer runtimeutil.HandleCrashWithContext(ctx, runtimeutil.PanicHandlers...)
 
 	taskWorkers := env.LookupEnvIntOr(common.EnvAgentTaskWorkers, 16)
 	requeueTime := env.LookupEnvDurationOr(common.EnvAgentPatchRate, 10*time.Second)
@@ -257,7 +257,7 @@ func (ae *AgentExecutor) executeHTTPTemplate(ctx context.Context, tmpl wfv1.Temp
 		return 0, err
 	}
 
-	outputs := wfv1.Outputs{Result: pointer.StringPtr(string(bodyBytes))}
+	outputs := wfv1.Outputs{Result: pointer.String(string(bodyBytes))}
 	phase := wfv1.NodeSucceeded
 	message := ""
 	if tmpl.HTTP.SuccessCondition == "" {

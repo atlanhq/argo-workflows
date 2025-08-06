@@ -91,7 +91,7 @@ func NewCronController(wfclientset versioned.Interface, dynamicInterface dynamic
 }
 
 func (cc *Controller) Run(ctx context.Context) {
-	defer runtimeutil.HandleCrash(runtimeutil.PanicHandlers...)
+	defer runtimeutil.HandleCrashWithContext(ctx, runtimeutil.PanicHandlers...)
 	defer cc.cronWfQueue.ShutDown()
 	log.Infof("Starting CronWorkflow controller")
 	if cc.instanceId != "" {
@@ -101,7 +101,10 @@ func (cc *Controller) Run(ctx context.Context) {
 	cc.cronWfInformer = dynamicinformer.NewFilteredDynamicSharedInformerFactory(cc.dynamicInterface, cronWorkflowResyncPeriod, cc.managedNamespace, func(options *v1.ListOptions) {
 		cronWfInformerListOptionsFunc(options, cc.instanceId)
 	}).ForResource(schema.GroupVersionResource{Group: workflow.Group, Version: workflow.Version, Resource: workflow.CronWorkflowPlural})
-	cc.addCronWorkflowInformerHandler()
+	err := cc.addCronWorkflowInformerHandler()
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	wfInformer := util.NewWorkflowInformer(cc.dynamicInterface, cc.managedNamespace, cronWorkflowResyncPeriod,
 		func(options *v1.ListOptions) { wfInformerListOptionsFunc(options, cc.instanceId) },
@@ -132,7 +135,7 @@ func (cc *Controller) runCronWorker() {
 }
 
 func (cc *Controller) processNextCronItem(ctx context.Context) bool {
-	defer runtimeutil.HandleCrash(runtimeutil.PanicHandlers...)
+	defer runtimeutil.HandleCrashWithContext(ctx, runtimeutil.PanicHandlers...)
 
 	key, quit := cc.cronWfQueue.Get()
 	if quit {
@@ -203,8 +206,8 @@ func (cc *Controller) processNextCronItem(ctx context.Context) bool {
 	return true
 }
 
-func (cc *Controller) addCronWorkflowInformerHandler() {
-	cc.cronWfInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+func (cc *Controller) addCronWorkflowInformerHandler() error {
+	_, err := cc.cronWfInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: func(obj interface{}) {
 			key, err := cache.MetaNamespaceKeyFunc(obj)
 			if err == nil {
@@ -224,10 +227,14 @@ func (cc *Controller) addCronWorkflowInformerHandler() {
 			}
 		},
 	})
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (cc *Controller) syncAll(ctx context.Context) {
-	defer runtimeutil.HandleCrash(runtimeutil.PanicHandlers...)
+	defer runtimeutil.HandleCrashWithContext(ctx, runtimeutil.PanicHandlers...)
 
 	log.Debug("Syncing all CronWorkflows")
 
@@ -269,10 +276,7 @@ func (cc *Controller) syncCronWorkflow(ctx context.Context, cronWf *v1alpha1.Cro
 	if err != nil {
 		return err
 	}
-	err = cwoc.reconcileActiveWfs(ctx, workflows)
-	if err != nil {
-		return err
-	}
+	cwoc.reconcileActiveWfs(ctx, workflows)
 
 	return nil
 }

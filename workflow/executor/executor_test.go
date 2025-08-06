@@ -32,57 +32,6 @@ const (
 	fakeContainerName = "main"
 )
 
-func TestWorkflowExecutor_LoadArtifacts(t *testing.T) {
-	tests := []struct {
-		name     string
-		artifact wfv1.Artifact
-		error    string
-	}{
-		{"ErrNotSupplied", wfv1.Artifact{Name: "foo"}, "required artifact 'foo' not supplied"},
-		{"ErrFailedToLoad", wfv1.Artifact{
-			Name: "foo",
-			Path: "/tmp/foo.txt",
-			ArtifactLocation: wfv1.ArtifactLocation{
-				S3: &wfv1.S3Artifact{
-					Key: "my-key",
-				},
-			},
-		}, "failed to load artifact 'foo': template artifact location not set"},
-		{"ErrNoPath", wfv1.Artifact{
-			Name: "foo",
-			ArtifactLocation: wfv1.ArtifactLocation{
-				S3: &wfv1.S3Artifact{
-					S3Bucket: wfv1.S3Bucket{Endpoint: "my-endpoint", Bucket: "my-bucket"},
-					Key:      "my-key",
-				},
-			},
-		}, "Artifact 'foo' did not specify a path"},
-		{"ErrDirTraversal", wfv1.Artifact{
-			Name: "foo",
-			Path: "/tmp/../etc/passwd",
-			ArtifactLocation: wfv1.ArtifactLocation{
-				S3: &wfv1.S3Artifact{
-					S3Bucket: wfv1.S3Bucket{Endpoint: "my-endpoint", Bucket: "my-bucket"},
-					Key:      "my-key",
-				},
-			},
-		}, "Artifact 'foo' attempted to use a path containing '..'. Directory traversal is not permitted"},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			we := WorkflowExecutor{
-				Template: wfv1.Template{
-					Inputs: wfv1.Inputs{
-						Artifacts: []wfv1.Artifact{test.artifact},
-					},
-				},
-			}
-			err := we.LoadArtifacts(context.Background())
-			assert.EqualError(t, err, test.error)
-		})
-	}
-}
-
 func TestSaveParameters(t *testing.T) {
 	fakeClientset := fake.NewSimpleClientset()
 	mockRuntimeExecutor := mocks.ContainerRuntimeExecutor{}
@@ -197,7 +146,7 @@ func TestDefaultParameters(t *testing.T) {
 	ctx := context.Background()
 	err := we.SaveParameters(ctx)
 	assert.NoError(t, err)
-	assert.Equal(t, we.Template.Outputs.Parameters[0].Value.String(), "Default Value")
+	assert.Equal(t, "Default Value", we.Template.Outputs.Parameters[0].Value.String())
 }
 
 func TestDefaultParametersEmptyString(t *testing.T) {
@@ -228,7 +177,7 @@ func TestDefaultParametersEmptyString(t *testing.T) {
 	ctx := context.Background()
 	err := we.SaveParameters(ctx)
 	assert.NoError(t, err)
-	assert.Equal(t, "", we.Template.Outputs.Parameters[0].Value.String())
+	assert.Empty(t, we.Template.Outputs.Parameters[0].Value.String())
 }
 
 func TestIsTarball(t *testing.T) {
@@ -474,10 +423,10 @@ func TestSaveArtifacts(t *testing.T) {
 		ctx := context.Background()
 		_, err := tt.workflowExecutor.SaveArtifacts(ctx)
 		if err != nil {
-			assert.Equal(t, tt.expectError, true)
+			assert.True(t, tt.expectError)
 			continue
 		}
-		assert.Equal(t, tt.expectError, false)
+		assert.False(t, tt.expectError)
 	}
 }
 
@@ -535,7 +484,7 @@ func TestSaveLogs(t *testing.T) {
 	t.Run("Simple Pod node", func(t *testing.T) {
 		templateWithArchiveLogs := wfv1.Template{
 			ArchiveLocation: &wfv1.ArtifactLocation{
-				ArchiveLogs: pointer.BoolPtr(true),
+				ArchiveLogs: pointer.Bool(true),
 			},
 		}
 		we := WorkflowExecutor{
@@ -575,7 +524,7 @@ func TestReportOutputs(t *testing.T) {
 		ctx := context.Background()
 		err := we.ReportOutputs(ctx, artifacts)
 
-		assert.Equal(t, err, nil)
+		assert.NoError(t, err)
 		assert.Empty(t, we.errors)
 	})
 

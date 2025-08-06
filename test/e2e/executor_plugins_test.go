@@ -37,16 +37,16 @@ func (s *ExecutorPluginsSuite) TestTemplateExecutor() {
 			if assert.Len(t, pods, 1) {
 				pod := pods[0]
 				spec := pod.Spec
-				assert.Equal(t, pointer.BoolPtr(false), spec.AutomountServiceAccountToken)
+				assert.Equal(t, pointer.Bool(false), spec.AutomountServiceAccountToken)
 				assert.Equal(t, &apiv1.PodSecurityContext{
 					RunAsUser:    pointer.Int64(8737),
-					RunAsNonRoot: pointer.BoolPtr(true),
+					RunAsNonRoot: pointer.Bool(true),
 				}, spec.SecurityContext)
 				if assert.Len(t, spec.Volumes, 4) {
 					assert.Contains(t, spec.Volumes[0].Name, "kube-api-access-")
-					assert.Equal(t, spec.Volumes[1].Name, "var-run-argo")
+					assert.Equal(t, "var-run-argo", spec.Volumes[1].Name)
 					assert.Contains(t, spec.Volumes[2].Name, "kube-api-access-")
-					assert.Equal(t, spec.Volumes[3].Name, "argo-workflows-agent-ca-certificates")
+					assert.Equal(t, "argo-workflows-agent-ca-certificates", spec.Volumes[3].Name)
 				}
 				if assert.Len(t, spec.Containers, 2) {
 					{
@@ -64,13 +64,13 @@ func (s *ExecutorPluginsSuite) TestTemplateExecutor() {
 							if assert.Len(t, agent.VolumeMounts, 3) {
 								assert.Equal(t, "var-run-argo", agent.VolumeMounts[0].Name)
 								assert.Contains(t, agent.VolumeMounts[1].Name, "kube-api-access-")
-								assert.Equal(t, agent.VolumeMounts[2].Name, "argo-workflows-agent-ca-certificates")
+								assert.Equal(t, "argo-workflows-agent-ca-certificates", agent.VolumeMounts[2].Name)
 							}
 							assert.Equal(t, &apiv1.SecurityContext{
 								RunAsUser:                pointer.Int64(8737),
-								RunAsNonRoot:             pointer.BoolPtr(true),
-								AllowPrivilegeEscalation: pointer.BoolPtr(false),
-								ReadOnlyRootFilesystem:   pointer.BoolPtr(true),
+								RunAsNonRoot:             pointer.Bool(true),
+								AllowPrivilegeEscalation: pointer.Bool(false),
+								ReadOnlyRootFilesystem:   pointer.Bool(true),
 								Capabilities:             &apiv1.Capabilities{Drop: []apiv1.Capability{"ALL"}},
 							}, agent.SecurityContext)
 						}
@@ -80,8 +80,8 @@ func (s *ExecutorPluginsSuite) TestTemplateExecutor() {
 		}).
 		ExpectWorkflowTaskSet(func(t *testing.T, wfts *wfv1.WorkflowTaskSet) {
 			assert.NotNil(t, wfts)
-			assert.Len(t, wfts.Spec.Tasks, 0)
-			assert.Len(t, wfts.Status.Nodes, 0)
+			assert.Empty(t, wfts.Spec.Tasks)
+			assert.Empty(t, wfts.Status.Nodes)
 			assert.Equal(t, "true", wfts.Labels[common.LabelKeyCompleted])
 		})
 }

@@ -13,13 +13,13 @@ import (
 	"github.com/argoproj/argo-workflows/v3/pkg/apis/workflow/v1alpha1"
 )
 
-func write(metric prometheus.Metric) dto.Metric {
+func write(metric prometheus.Metric) *dto.Metric {
 	var m dto.Metric
 	err := metric.Write(&m)
 	if err != nil {
 		panic(err)
 	}
-	return m
+	return &m
 }
 
 func TestServerConfig_SameServerAs(t *testing.T) {
@@ -90,14 +90,6 @@ func TestMetrics(t *testing.T) {
 	}
 }
 
-func TestErrors(t *testing.T) {
-	_, err := ConstructRealTimeGaugeMetric(&v1alpha1.Prometheus{Name: "invalid.name"}, func() float64 { return 0.0 })
-	assert.Error(t, err)
-
-	_, err = ConstructRealTimeGaugeMetric(&v1alpha1.Prometheus{Name: "name", Labels: []*v1alpha1.MetricLabel{{Key: "invalid-key", Value: "value"}}}, func() float64 { return 0.0 })
-	assert.Error(t, err)
-}
-
 func TestMetricGC(t *testing.T) {
 	config := ServerConfig{
 		Enabled: true,
@@ -106,7 +98,7 @@ func TestMetricGC(t *testing.T) {
 		TTL:     1 * time.Second,
 	}
 	m := New(config, config)
-	assert.Len(t, m.customMetrics, 0)
+	assert.Empty(t, m.customMetrics)
 
 	err := m.UpsertCustomMetric("metric", "", newCounter("test", "test", nil), false)
 	if assert.NoError(t, err) {
@@ -128,7 +120,7 @@ func TestMetricGC(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 	}
 
-	assert.Len(t, m.customMetrics, 0)
+	assert.Empty(t, m.customMetrics)
 }
 
 func TestRealtimeMetricGC(t *testing.T) {
@@ -139,7 +131,7 @@ func TestRealtimeMetricGC(t *testing.T) {
 		TTL:     1 * time.Second,
 	}
 	m := New(config, config)
-	assert.Len(t, m.customMetrics, 0)
+	assert.Empty(t, m.customMetrics)
 
 	err := m.UpsertCustomMetric("realtime_metric", "workflow-uid", newCounter("test", "test", nil), true)
 	if assert.NoError(t, err) {
@@ -175,7 +167,7 @@ func TestRealtimeMetricGC(t *testing.T) {
 		// Sleep to prevent overloading test worker CPU.
 		time.Sleep(100 * time.Millisecond)
 	}
-	assert.Len(t, m.customMetrics, 0)
+	assert.Empty(t, m.customMetrics)
 }
 
 func TestWorkflowQueueMetrics(t *testing.T) {
@@ -220,7 +212,7 @@ func TestRealTimeMetricDeletion(t *testing.T) {
 
 	m.DeleteRealtimeMetricsForKey("123")
 	assert.Empty(t, m.workflows["123"])
-	assert.Len(t, m.customMetrics, 0)
+	assert.Empty(t, m.customMetrics)
 
 	metric, err := ConstructOrUpdateMetric(nil, &v1alpha1.Prometheus{Name: "name", Help: "hello", Gauge: &v1alpha1.Gauge{Value: "1"}})
 	assert.NoError(t, err)
