@@ -24,7 +24,7 @@
         "cronstrue": "^2.44.0",
         "dagre": "^0.8.5",
         "history": "^4.10.1",
-        "js-yaml": "^4.1.0",
+        "js-yaml": "^4.1.1",
         "moment": "^2.29.4",
         "moment-timezone": "^0.5.43",
         "monaco-editor": "^0.44.0",
