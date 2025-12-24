@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strconv"
 	gosync "sync"
 	"syscall"
@@ -458,7 +459,8 @@ func (wfc *WorkflowController) runConfigMapWatcher(stopCh <-chan struct{}) {
 		case event := <-retryWatcher.ResultChan():
 			cm, ok := event.Object.(*apiv1.ConfigMap)
 			if !ok {
-				log.Errorf("invalid config map object received in config watcher. Ignored processing")
+				// TODO
+				// log.Errorf("invalid config map object received in config watcher. Ignored processing")
 				continue
 			}
 			log.Debugf("received config map %s/%s update", cm.Namespace, cm.Name)
@@ -818,6 +820,13 @@ func (wfc *WorkflowController) processNextItem(ctx context.Context) bool {
 		val, ok := annotation["bypass-parallelism"]
 		if ok {
 			bypassParallelism = val
+		}
+	}
+	wfParallelismBypassPattern, _ := os.LookupEnv("WF_PARALLELISM_BYPASS_PATTERN")
+	if wfParallelismBypassPattern != "" {
+		matchWfPattern, _ := regexp.MatchString(wfParallelismBypassPattern, wf.Name)
+		if matchWfPattern {
+			bypassParallelism = "true"
 		}
 	}
 
