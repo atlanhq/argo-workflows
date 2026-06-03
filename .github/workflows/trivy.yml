@@ -1,0 +1,64 @@
+name: Trivy image scan
+
+# Builds the three images produced from the Dockerfile and scans each with Trivy.
+# Prints a vulnerability report in the job log and FAILS the job on any fixable
+# CRITICAL or HIGH finding (OS packages + Go binary / application dependencies).
+
+on:
+  push:
+    branches:
+      - "3.5.14-atlan*"
+  pull_request:
+    branches:
+      - "3.5.14-atlan*"
+  schedule:
+    # Weekly, Monday 06:00 UTC — catches newly-disclosed CVEs in already-shipped images.
+    # Note: scheduled runs only execute from the repository's default branch.
+    - cron: "0 6 * * 1"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Scan ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [ workflow-controller, argocli, argoexec ]
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
+
+      - uses: docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226 # v3.0.0
+
+      - name: Build ${{ matrix.image }} image
+        uses: docker/build-push-action@4a13e500e55cf31b7a5d59a38ab2040ab0f42f56 # v5.1.0
+        with:
+          context: .
+          target: ${{ matrix.image }}
+          tags: argoproj/${{ matrix.image }}:${{ github.sha }}
+          load: true
+          push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scanner on ${{ matrix.image }}
+        uses: aquasecurity/trivy-action@7b7aa264d83dc58691451798b4d117d53d21edfe # v0.20.0
+        with:
+          image-ref: argoproj/${{ matrix.image }}:${{ github.sha }}
+          scanners: vuln
+          vuln-type: os,library
+          severity: CRITICAL,HIGH
+          # Only gate on vulnerabilities that have a fix available — un-fixable
+          # CVEs (no upstream patch yet) are reported but must not block the build.
+          ignore-unfixed: true
+          format: table
+          exit-code: "1"
+        env:
+          TRIVY_DB_REPOSITORY: ghcr.io/aquasecurity/trivy-db
