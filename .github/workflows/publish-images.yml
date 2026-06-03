@@ -1,11 +1,13 @@
 name: Publish images (ghcr)
 
-# Builds the three argo images from the Dockerfile and pushes them to
-# ghcr.io/atlanhq/<image>:<tag> for the Atlan fork.
+# Builds the three argo images and pushes them to ghcr.io/atlanhq/<image>:<tag>
+# for the Atlan fork.
 #
-# Triggered by pushing a tag like `v3.5.14-atlan-1.6` (the image tag is taken
-# from the git tag), so images can be published for testing WITHOUT merging the
-# PR / changing the default branch. Also exposes workflow_dispatch for manual runs.
+# Each architecture is built on its OWN runner (amd64 + arm64 natively, no QEMU
+# and no shared build cache to corrupt), pushed as a per-arch tag, then merged
+# into a single multi-arch manifest. Triggered by pushing a `v3.5.14-atlan-*`
+# tag (image tag taken from the git tag) so images can be published for testing
+# WITHOUT merging the PR / changing the default branch.
 
 on:
   push:
@@ -18,11 +20,6 @@ on:
         required: true
         default: "v3.5.14-atlan-1.6"
         type: string
-      platforms:
-        description: "Target platforms"
-        required: true
-        default: "linux/amd64,linux/arm64"
-        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -32,21 +29,41 @@ permissions:
   contents: read
   packages: write
 
+env:
+  REGISTRY: ghcr.io/atlanhq
+
 jobs:
-  build-push:
-    name: Build & push ${{ matrix.target }}
+  prepare:
+    name: Resolve tag
     if: github.repository == 'atlanhq/argo-workflows'
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.t.outputs.tag }}
+    steps:
+      - id: t
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ github.event.inputs.tag }}"
+          else
+            tag="${GITHUB_REF##*/}"   # refs/tags/v3.5.14-atlan-1.6 -> v3.5.14-atlan-1.6
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.target }} (${{ matrix.arch.suffix }})
+    needs: prepare
+    runs-on: ${{ matrix.arch.runner }}
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
         target: [ workflow-controller, argocli, argoexec ]
+        arch:
+          - { platform: linux/amd64, runner: ubuntu-latest,    suffix: amd64 }
+          - { platform: linux/arm64, runner: ubuntu-24.04-arm, suffix: arm64 }
     steps:
       - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4.1.1
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@68827325e0b33c7199eb31dd4e31fbe9023e06e3 # v3.0.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@f95db51fddba0c2d1ec667646a06c2ce06100226 # v3.0.0
@@ -59,31 +76,45 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.ORG_PAT_GITHUB }}
 
-      - name: Resolve image tag and platforms
-        id: meta
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            tag="${{ github.event.inputs.tag }}"
-            platforms="${{ github.event.inputs.platforms }}"
-          else
-            tag="${GITHUB_REF##*/}"     # refs/tags/v3.5.14-atlan-1.6 -> v3.5.14-atlan-1.6
-            platforms="linux/amd64,linux/arm64"
-          fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "platforms=$platforms" >> "$GITHUB_OUTPUT"
-
-      - name: Build & push ${{ matrix.target }}
+      - name: Build & push ${{ matrix.target }} (${{ matrix.arch.platform }})
         uses: docker/build-push-action@4a13e500e55cf31b7a5d59a38ab2040ab0f42f56 # v5.1.0
         with:
           context: .
           target: ${{ matrix.target }}
-          platforms: ${{ steps.meta.outputs.platforms }}
+          platforms: ${{ matrix.arch.platform }}
           push: true
           provenance: false
-          tags: ghcr.io/atlanhq/${{ matrix.target }}:${{ steps.meta.outputs.tag }}
+          tags: ${{ env.REGISTRY }}/${{ matrix.target }}:${{ needs.prepare.outputs.tag }}-${{ matrix.arch.suffix }}
           build-args: |
             GIT_COMMIT=${{ github.sha }}
             GIT_TREE_STATE=clean
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.target }}-${{ matrix.arch.suffix }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}-${{ matrix.arch.suffix }}
+
+  merge:
+    name: Merge manifest ${{ matrix.target }}
+    needs: [ prepare, build ]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [ workflow-controller, argocli, argoexec ]
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d # v3.0.0
+        with:
+          logout: false
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.ORG_PAT_GITHUB }}
+
+      - name: Create and push multi-arch manifest
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          IMAGE: ${{ env.REGISTRY }}/${{ matrix.target }}
+        run: |
+          set -euxo pipefail
+          docker buildx imagetools create -t "$IMAGE:$TAG" \
+            "$IMAGE:$TAG-amd64" \
+            "$IMAGE:$TAG-arm64"
+          docker buildx imagetools inspect "$IMAGE:$TAG"
