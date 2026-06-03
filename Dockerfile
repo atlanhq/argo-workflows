@@ -19,7 +19,7 @@ RUN apk update && apk add --no-cache \
 WORKDIR /go/src/github.com/argoproj/argo-workflows
 COPY go.mod .
 COPY go.sum .
-RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 COPY . .
 
@@ -31,14 +31,14 @@ RUN apk update && apk add --no-cache git
 
 COPY ui/package.json ui/yarn.lock ui/
 
-RUN --mount=type=cache,target=/root/.yarn,sharing=locked \
+RUN --mount=type=cache,target=/root/.yarn \
   YARN_CACHE_FOLDER=/root/.yarn \
   yarn --cwd ui install --network-timeout 1000000 --network-concurrency 1
 
 COPY ui ui
 COPY api api
 
-RUN --mount=type=cache,target=/root/.yarn,sharing=locked \
+RUN --mount=type=cache,target=/root/.yarn \
   YARN_CACHE_FOLDER=/root/.yarn JOBS=max \
   NODE_OPTIONS="--openssl-legacy-provider --max-old-space-size=2048" JOBS=max yarn --cwd ui build
 
@@ -50,7 +50,7 @@ ARG GIT_COMMIT
 ARG GIT_TAG
 ARG GIT_TREE_STATE
 
-RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked --mount=type=cache,target=/root/.cache/go-build,sharing=locked make dist/argoexec GIT_COMMIT=${GIT_COMMIT} GIT_TAG=${GIT_TAG} GIT_TREE_STATE=${GIT_TREE_STATE}
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build make dist/argoexec GIT_COMMIT=${GIT_COMMIT} GIT_TAG=${GIT_TAG} GIT_TREE_STATE=${GIT_TREE_STATE}
 
 ####################################################################################################
 
@@ -60,7 +60,7 @@ ARG GIT_COMMIT
 ARG GIT_TAG
 ARG GIT_TREE_STATE
 
-RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked --mount=type=cache,target=/root/.cache/go-build,sharing=locked make dist/workflow-controller GIT_COMMIT=${GIT_COMMIT} GIT_TAG=${GIT_TAG} GIT_TREE_STATE=${GIT_TREE_STATE}
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build make dist/workflow-controller GIT_COMMIT=${GIT_COMMIT} GIT_TAG=${GIT_TAG} GIT_TREE_STATE=${GIT_TREE_STATE}
 
 ####################################################################################################
 
@@ -75,7 +75,7 @@ COPY --from=argo-ui ui/dist/app ui/dist/app
 # update timestamp so that `make` doesn't try to rebuild this -- it was already built in the previous stage
 RUN touch ui/dist/app/index.html
 
-RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked --mount=type=cache,target=/root/.cache/go-build,sharing=locked STATIC_FILES=true make dist/argo GIT_COMMIT=${GIT_COMMIT} GIT_TAG=${GIT_TAG} GIT_TREE_STATE=${GIT_TREE_STATE}
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build STATIC_FILES=true make dist/argo GIT_COMMIT=${GIT_COMMIT} GIT_TAG=${GIT_TAG} GIT_TREE_STATE=${GIT_TREE_STATE}
 
 ####################################################################################################
 
