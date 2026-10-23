@@ -1321,7 +1321,9 @@ func TestWorkflowWithLongArguments(t *testing.T) {
 	makePodsPhase(ctx, woc, apiv1.PodSucceeded)
 
 	woc.operate(ctx)
+	// 3.5 queues a single cleanup action for the succeeded pod; a second
+	// processNextPodCleanupItem blocks forever on the empty queue.
 	assert.True(t, controller.processNextPodCleanupItem(ctx))
-	assert.True(t, controller.processNextPodCleanupItem(ctx))
+	assert.Equal(t, 0, controller.podCleanupQueue.Len())
 	assert.Equal(t, wfv1.WorkflowSucceeded, woc.wf.Status.Phase)
 }
