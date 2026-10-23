@@ -369,7 +369,9 @@ swagger: \
 $(TOOL_MOCKERY): Makefile
 # update this in Nix when upgrading it here
 ifneq ($(USE_NIX), true)
-	go install github.com/vektra/mockery/v2@v2.53.3
+	# Build mockery with the module's toolchain: `go install pkg@version` ignores
+	# go.mod, and a mockery built with an older Go can't parse this module.
+	GOTOOLCHAIN=$(shell go env GOVERSION) go install github.com/vektra/mockery/v2@v2.53.3
 endif
 $(TOOL_CONTROLLER_GEN): Makefile
 # update this in Nix when upgrading it here
