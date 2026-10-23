@@ -1,9 +1,8 @@
 package util
 
 import (
+	context0 "context"
 	"time"
-
-	"golang.org/x/net/context"
 
 	"k8s.io/client-go/tools/cache"
 )
@@ -27,7 +26,7 @@ func (s *SharedIndexInformer) AddEventHandlerWithResyncPeriod(cache.ResourceEven
 func (s *SharedIndexInformer) GetStore() cache.Store           { return s.Indexer }
 func (s *SharedIndexInformer) GetController() cache.Controller { panic("implement me") }
 func (s *SharedIndexInformer) Run(<-chan struct{})             {}
-func (s *SharedIndexInformer) RunWithContext(ctx context.Context) {
+func (s *SharedIndexInformer) RunWithContext(ctx context0.Context) {
 	panic("implement me")
 }
 func (s *SharedIndexInformer) HasSynced() bool                                            { return true }

@@ -1300,7 +1300,7 @@ func TestWorkflowWithLongArguments(t *testing.T) {
 	woc.operate(ctx)
 	assert.Equal(t, wfv1.WorkflowRunning, woc.wf.Status.Phase)
 
-	cms, err := controller.kubeclientset.CoreV1().ConfigMaps(woc.wf.ObjectMeta.Namespace).List(ctx, metav1.ListOptions{LabelSelector: common.LabelKeyWorkflow + "=" + woc.wf.ObjectMeta.Name})
+	cms, err := controller.kubeclientset.CoreV1().ConfigMaps(woc.wf.ObjectMeta.Namespace).List(ctx, metav1.ListOptions{LabelSelector: common.LabelKeyWorkflow + "=" + woc.wf.Name})
 	assert.NoError(t, err)
 	assert.Equal(t, 1, len(cms.Items))
 	assert.Contains(t, cms.Items[0].Data, common.EnvVarTemplate)
@@ -1321,7 +1321,9 @@ func TestWorkflowWithLongArguments(t *testing.T) {
 	makePodsPhase(ctx, woc, apiv1.PodSucceeded)
 
 	woc.operate(ctx)
+	// 3.5 queues a single cleanup action for the succeeded pod; a second
+	// processNextPodCleanupItem blocks forever on the empty queue.
 	assert.True(t, controller.processNextPodCleanupItem(ctx))
-	assert.True(t, controller.processNextPodCleanupItem(ctx))
+	assert.Equal(t, 0, controller.podCleanupQueue.Len())
 	assert.Equal(t, wfv1.WorkflowSucceeded, woc.wf.Status.Phase)
 }

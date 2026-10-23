@@ -419,9 +419,9 @@ func (woc *wfOperationCtx) createWorkflowPod(ctx context.Context, nodeName strin
 		cm := &apiv1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      cmName,
-				Namespace: woc.wf.ObjectMeta.Namespace,
+				Namespace: woc.wf.Namespace,
 				Labels: map[string]string{
-					common.LabelKeyWorkflow: woc.wf.ObjectMeta.Name,
+					common.LabelKeyWorkflow: woc.wf.Name,
 				},
 				Annotations: map[string]string{
 					common.AnnotationKeyNodeName: nodeName,
