@@ -369,7 +369,9 @@ swagger: \
 $(TOOL_MOCKERY): Makefile
 # update this in Nix when upgrading it here
 ifneq ($(USE_NIX), true)
-	go install github.com/vektra/mockery/v2@v2.53.3
+	# Build mockery with the module's toolchain: `go install pkg@version` ignores
+	# go.mod, and a mockery built with an older Go can't parse this module.
+	GOTOOLCHAIN=$(shell go env GOVERSION) go install github.com/vektra/mockery/v2@v2.53.3
 endif
 $(TOOL_CONTROLLER_GEN): Makefile
 # update this in Nix when upgrading it here
@@ -532,7 +534,7 @@ manifests-validate:
 	kubectl apply --server-side --validate=strict --dry-run=server -f 'manifests/*.yaml'
 
 $(TOOL_GOLANGCI_LINT): Makefile
-	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b `go env GOPATH`/bin v2.3.0
+	curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/v2.14.0/install.sh | sh -s -- -b `go env GOPATH`/bin v2.14.0
 
 .PHONY: lint lint-go lint-ui
 lint: lint-go lint-ui
