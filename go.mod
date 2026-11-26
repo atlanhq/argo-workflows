@@ -1,7 +1,6 @@
 module github.com/argoproj/argo-workflows/v3
 
 go 1.26.9
-
 require (
 	cloud.google.com/go/storage v1.56.0
 	github.com/Azure/azure-sdk-for-go/sdk/azidentity v1.10.1
@@ -19,7 +18,7 @@ require (
 	github.com/coreos/go-oidc/v3 v3.7.0
 	github.com/doublerebel/bellows v0.0.0-20160303004610-f177d92a03d3
 	github.com/evanphx/json-patch v5.8.0+incompatible
-	github.com/expr-lang/expr v1.17.7
+	github.com/expr-lang/expr v1.18.1
 	github.com/gavv/httpexpect/v2 v2.16.0
 	github.com/go-git/go-git/v5 v5.19.3
 	github.com/go-jose/go-jose/v3 v3.0.5
